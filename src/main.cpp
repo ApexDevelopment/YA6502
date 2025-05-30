@@ -347,7 +347,10 @@ struct CPU {
 				Word target = make_address(b_lo, b_hi);
 				last_jump_origin = PC;
 				last_jump_target = target;
-				PC = target - 1; // compensate for PC++
+				// Normally we would compensate for PC++ by subtracting 1.
+				// However, JSR pushes the return address minus 1.
+				// So, in this case, we want PC++ to happen.
+				PC = target;
 				break;
 			}
 
@@ -454,6 +457,8 @@ struct CPU {
 			// Odd one out:
 			case 0x20: {
 				// JSR
+				// PC + 3 is the address of the next instruction.
+				// JSR pushes next_instruction_addr - 1, in essence PC + 2.
 				Word return_addr = PC + 2;
 				stack_push(mmu, hi(return_addr));
 				stack_push(mmu, lo(return_addr));
