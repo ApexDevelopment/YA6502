@@ -646,8 +646,10 @@ struct CPU {
 					else if (final_addr_mode == CPU_ADDR_MODE_ZPY)
 						final_addr_mode = CPU_ADDR_MODE_ZPX;
 
-					// TODO: STX abs,Y is unassigned
-					auto_write_value(mmu, next_byte, final_addr_mode, X);
+					// STX abs,Y is unassigned
+					if (final_addr_mode != CPU_ADDR_MODE_INVALID) {
+						auto_write_value(mmu, next_byte, final_addr_mode, X);
+					}
 					break;
 				}
 				case 0b101: {
