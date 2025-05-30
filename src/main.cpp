@@ -3,9 +3,9 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <memory>
 #include "types.hpp"
 #include "bin.hpp"
-#include "page.hpp"
 #include "page.cpp"
 
 struct MMU {
