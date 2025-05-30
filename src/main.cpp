@@ -363,7 +363,7 @@ struct CPU {
 				Byte b_hi = stack_pull(mmu);
 				Word target = make_address(b_lo, b_hi);
 				last_jump_origin = PC;
-				last_jump_target = target;
+				last_jump_target = target + 1;
 				// Normally we would compensate for PC++ by subtracting 1.
 				// However, JSR pushes the return address minus 1.
 				// So, in this case, we want PC++ to happen.
@@ -677,16 +677,21 @@ struct CPU {
 					// DEC - Decrement Memory
 					// DEC A is DEX but that is handled earlier
 					// TODO: Check if this uses the correct number of cycles
-					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode);
-					auto_write_value(mmu, next_byte, final_addr_mode, M - 1);
+					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode) - 1;
+					set_flag(CPU_FLAG_Z, M == 0);
+					set_flag(CPU_FLAG_N, M & 0b10000000);
+					auto_write_value(mmu, next_byte, final_addr_mode, M);
 					break;
 				}
 				case 0b111: {
 					// INC - Increment Memory
 					// INC A is NOP but that is handled earlier
 					// TODO: Check if this uses the correct number of cycles
-					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode);
-					auto_write_value(mmu, next_byte, final_addr_mode, M + 1);
+					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode) + 1;
+					set_flag(CPU_FLAG_Z, M == 0);
+					set_flag(CPU_FLAG_N, M & 0b10000000);
+					auto_write_value(mmu, next_byte, final_addr_mode, M);
+					break;
 				}
 				default:
 				PC++;
