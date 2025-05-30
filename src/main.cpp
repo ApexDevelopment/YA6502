@@ -328,7 +328,10 @@ struct CPU {
 				stack_push(mmu, hi(to_push));
 				stack_push(mmu, lo(to_push));
 				stack_push_status_flags(mmu);
-				SF |= CPU_FLAG_B;
+				// https://www.masswerk.at/6502/6502_instruction_set.html#BRK
+				// These guys say BRK does not disable interrupts, but everywhere
+				// else I look says it does.
+				SF |= CPU_FLAG_B | CPU_FLAG_I;
 				Word interrupt_vector = make_address(fetch_one_byte(mmu, 0xFFFE), fetch_one_byte(mmu, 0xFFFF));
 				last_jump_origin = PC;
 				last_jump_target = interrupt_vector;
@@ -691,10 +694,10 @@ struct CPU {
 					last_jump_origin = PC;
 					stall_n_cycles(mmu, 1); // TODO: 2 if to a new page
 					PC = static_cast<Word>(PC + (Byte_S)next_byte); // Convert to signed type to do signed addition
-					last_jump_target = PC;
 				}
 				
 				PC += 2; // PC is always incremented by 2 here
+				last_jump_target = PC;
 				break; // Prevents the switch(aaa) from running
 			}
 			switch (aaa) {
