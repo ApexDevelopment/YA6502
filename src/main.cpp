@@ -414,6 +414,18 @@ struct CPU {
 			set_flag(CPU_FLAG_Z, A == 0);
 			set_flag(CPU_FLAG_N, A & 0b10000000);
 			break;
+			case 0xAA:
+			// TAX
+			X = A;
+			set_flag(CPU_FLAG_Z, X == 0);
+			set_flag(CPU_FLAG_N, X & 0b10000000);
+			break;
+			case 0x8A:
+			// TXA
+			A = X;
+			set_flag(CPU_FLAG_Z, A == 0);
+			set_flag(CPU_FLAG_N, A & 0b10000000);
+			break;
 			case 0x9A:
 			// TXS
 			SP = X;
@@ -624,7 +636,7 @@ struct CPU {
 				}
 				case 0b100: {
 					// STX - Store X Register
-					// STX A = TXA
+					// STX A = TXA but that is handled earlier
 
 					// Addressing mode quirk:
 					// zpx <-> zpy
@@ -640,17 +652,11 @@ struct CPU {
 
 					// TODO: STX abs,Y is unassigned
 					auto_write_value(mmu, next_byte, final_addr_mode, X);
-
-					// TXA updates flags where STX doesn't
-					if (final_addr_mode == CPU_ADDR_MODE_ACC) {
-						set_flag(CPU_FLAG_Z, A == 0);
-						set_flag(CPU_FLAG_N, A & 0b10000000);
-					}
 					break;
 				}
 				case 0b101: {
 					// LDX - Load X Register
-					// LDX A = TAX exactly, apparently
+					// LDX A = TAX but that is handled earlier
 
 					// Addressing mode quirk:
 					// zpx <-> zpy
@@ -864,20 +870,34 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			else if (cmd == 'j' || cmd == 'J') {
-				Word location = static_cast<Word>(std::stoi(command_parts[1]));
-				std::cout << "Jumping to 0x" << std::hex << (int)location << std::endl;
-				cpu.PC = location;
+				try {
+					Word location = static_cast<Word>(parse_numeric_literal(command_parts[1]));
+					std::cout << "Jumping to 0x" << std::hex << (int)location << std::endl;
+					cpu.PC = location;
+				}
+				catch (const std::exception& e) {
+					std::cerr << "Invalid numeric input: " << e.what() << std::endl;
+				}
 				continue;
 			}
 			else if (cmd == 'b' || cmd == 'B') {
-				Word location = static_cast<Word>(std::stoi(command_parts[1]));
-				std::cout << "Breakpoint set at 0x" << std::hex << (int)location << std::endl;
-				cpu.breakpoints.push_back(location);
+				try {
+					Word location = static_cast<Word>(parse_numeric_literal(command_parts[1]));
+					std::cout << "Breakpoint set at 0x" << std::hex << (int)location << std::endl;
+					cpu.breakpoints.push_back(location);
+				}
+				catch (const std::exception& e) {
+					std::cerr << "Invalid numeric input: " << e.what() << std::endl;
+				}
 				continue;
 			}
 			else if (cmd == 'r' || cmd == 'R') {
 				std::cout << "Running..." << std::endl;
 				paused = false;
+			}
+			else if (cmd == 'i' || cmd == 'I') {
+				cpu.dump_state(mmu);
+				continue;
 			}
 			else {
 				std::cout << "Stepping one instruction." << std::endl;
