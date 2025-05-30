@@ -1,0 +1,854 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+#include <vector>
+#include "types.hpp"
+#include "page.hpp"
+#include "page.cpp"
+
+struct MMU {
+	MemoryPage* pages[256];
+
+	void initialize() {
+		for (int i = 0; i < 256; i++) {
+			pages[i] = new Page();
+		}
+	}
+
+	Byte read_byte(Word address) {
+		Byte page_num = (Byte)((address & 0xFF00) >> 8);
+		Byte page_addr = address & 0xFF;
+		return pages[page_num]->read_byte(page_addr);
+	}
+
+	void write_byte(Word address, Byte value) {
+		Byte page_num = (Byte)((address & 0xFF00) >> 8);
+		Byte page_addr = address & 0xFF;
+		pages[page_num]->write_byte(page_addr, value);
+	}
+
+	Word read_word(Word address) {
+		// Little-endian
+		Word byte_lo = (Word)read_byte(address);
+		Word byte_hi = (Word)read_byte(address + 1) << 8;
+		return byte_lo | byte_hi;
+	}
+};
+
+static Byte addr_mode_table[8][8] = {
+	{ CPU_ADDR_MODE_IMM,     CPU_ADDR_MODE_ZPG, CPU_ADDR_MODE_INVALID, CPU_ADDR_MODE_ABS, CPU_ADDR_MODE_INVALID, CPU_ADDR_MODE_ZPX, CPU_ADDR_MODE_INVALID, CPU_ADDR_MODE_ABX },
+	{ CPU_ADDR_MODE_ZPX_IND, CPU_ADDR_MODE_ZPG, CPU_ADDR_MODE_IMM,     CPU_ADDR_MODE_ABS, CPU_ADDR_MODE_ZPY_IND, CPU_ADDR_MODE_ZPX, CPU_ADDR_MODE_ABY,     CPU_ADDR_MODE_ABX },
+	{ CPU_ADDR_MODE_IMM,     CPU_ADDR_MODE_ZPG, CPU_ADDR_MODE_ACC,     CPU_ADDR_MODE_ABS, CPU_ADDR_MODE_INVALID, CPU_ADDR_MODE_ZPX, CPU_ADDR_MODE_INVALID, CPU_ADDR_MODE_ABX },
+
+	{ CPU_ADDR_MODE_INVALID },
+	{ CPU_ADDR_MODE_INVALID },
+	{ CPU_ADDR_MODE_INVALID },
+	{ CPU_ADDR_MODE_INVALID },
+	{ CPU_ADDR_MODE_INVALID }
+};
+
+struct CPU {
+	unsigned long cycle_count = 0;
+	
+	Byte A, X, Y; // Registers
+	Byte SP;      // Stack Pointer
+	Word PC;      // Program Counter
+	Byte SF;      // Status Flags
+	Word addr_bus_value = 0;
+	Byte data_bus_value = 0;
+
+	Word last_good_instruction = 0;
+	Word last_jump = 0;
+
+	void reset(MMU& mmu) {
+		A = 0;
+		X = 0;
+		Y = 0;
+		SP = 0xFD; // Stack pointer starts at 0x01FF, but is decremented first
+		PC = mmu.read_word(0xFFFC); // Read reset vector
+		SF = 0b00110100; // Processor status. No interrupts, no decimal mode, set break flag
+	}
+
+	void set_flag(Word flag, Byte value) {
+		if (value == 0) {
+			SF &= ~flag;
+		} else {
+			SF |= flag;
+		}
+	}
+
+	Byte check_flag(Word flag) {
+		if (SF & flag) {
+			return 1;
+		}
+		return 0;
+	}
+
+	void dump_state(MMU& mmu) {
+		std::cout << "CPU State:" << std::endl;
+		Byte instruction = mmu.read_byte(PC);
+		Word next_word = mmu.read_word(PC + 1);
+		std::cout << "Instruction: 0x" << std::hex << (int)instruction << std::endl;
+		std::cout << "Next Word: 0x" << std::hex << (int)next_word << std::endl;
+		std::cout << "A: 0x"  << std::hex << (int)A  << std::endl;
+		std::cout << "X: 0x"  << std::hex << (int)X  << std::endl;
+		std::cout << "Y: 0x"  << std::hex << (int)Y  << std::endl;
+		std::cout << "SP: 0x" << std::hex << (int)SP << std::endl;
+		std::cout << "PC: 0x" << std::hex <<      PC << std::endl;
+		std::cout << "SF: 0x" << std::hex << (int)SF << std::endl << std::endl;
+		std::cout << "Last known good instruction was at 0x" << std::hex << (int)last_good_instruction << std::endl;
+		std::cout << "How did we get here? 0x" << std::hex << (int)last_jump << std::endl;
+	}
+
+	void exec_cycle(MMU& mmu, Byte micro_op) {
+		switch (micro_op) {
+			case CPU_UOP_FETCH:
+			data_bus_value = mmu.read_byte(addr_bus_value);
+			break;
+			case CPU_UOP_WRITE:
+			mmu.write_byte(addr_bus_value, data_bus_value);
+			break;
+			case CPU_UOP_NONE:
+			default: break;
+		}
+
+		cycle_count++;
+	}
+
+	void stall_n_cycles(MMU& mmu, int n_cycles) {
+		// Could probably just cycle_count+=n_cycles but whatever
+		for (n_cycles; n_cycles >= 0; n_cycles--) {
+			exec_cycle(mmu, CPU_UOP_NONE);
+		}
+	}
+
+	Byte fetch_one_byte(MMU& mmu, Word address) {
+		addr_bus_value = address;
+		exec_cycle(mmu, CPU_UOP_FETCH);
+		return data_bus_value;
+	}
+
+	void write_one_byte(MMU& mmu, Word address, Byte value) {
+		addr_bus_value = address;
+		data_bus_value = value;
+		exec_cycle(mmu, CPU_UOP_WRITE);
+	}
+
+	void stack_push(MMU& mmu, Byte value) {
+		Word address = (Word)SP | 0x0100;
+		write_one_byte(mmu, address, value);
+		SP--;
+	}
+
+	Byte stack_pull(MMU& mmu) {
+		SP++;
+		Word address = (Word)SP | 0x0100;
+		return fetch_one_byte(mmu, address);
+	}
+
+	void stack_push_status_flags(MMU& mmu) {
+		// " The status register will be pushed with the break
+		//   flag and bit 5 set to 1. "
+		// https://www.masswerk.at/6502/6502_instruction_set.html
+		// So if this is wrong blame those guys.
+		stack_push(mmu, SF | CPU_FLAG_B | CPU_FLAG_UNUSED);
+	}
+
+	void stack_pull_status_flags(MMU& mmu) {
+		// " The status register will be pulled with the break
+		//   flag and bit 5 ignored. "
+		Byte old_flags = SF;
+		Byte new_flags = stack_pull(mmu);
+		Byte retain = CPU_FLAG_B | CPU_FLAG_UNUSED;
+		SF = (old_flags & retain) | (new_flags & ~retain);
+	}
+
+	Byte decode_addr_mode(Byte group, Byte opcode_encoded_mode) {
+		return addr_mode_table[group][opcode_encoded_mode];
+	}
+
+	void auto_increment_pc(Byte addressing_mode) {
+		switch (addressing_mode) {
+			case CPU_ADDR_MODE_ACC:
+			PC++;
+			break;
+			case CPU_ADDR_MODE_IMM:
+			case CPU_ADDR_MODE_ZPG:
+			case CPU_ADDR_MODE_ZPX:
+			case CPU_ADDR_MODE_ZPY:
+			case CPU_ADDR_MODE_ZPX_IND:
+			case CPU_ADDR_MODE_ZPY_IND:
+			PC += 2;
+			break;
+			case CPU_ADDR_MODE_ABS:
+			case CPU_ADDR_MODE_ABX:
+			case CPU_ADDR_MODE_ABY:
+			PC += 3;
+			break;
+		}
+	}
+
+	// https://www.nesdev.org/obelisk-6502-guide/addressing.html
+	// TODO: Handle the 6502's page boundary bugs
+	Byte auto_fetch_value(MMU& mmu, Byte next_byte, Byte addressing_mode) {
+		switch (addressing_mode) {
+			case CPU_ADDR_MODE_IMM:
+			return next_byte;
+			case CPU_ADDR_MODE_ACC:
+			return A;
+			case CPU_ADDR_MODE_ZPG:
+			return fetch_one_byte(mmu, (Word)next_byte);
+			case CPU_ADDR_MODE_ZPX: {
+				// The 6502 wastes a cycle reading the unindexed ZP address
+				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				return fetch_one_byte(mmu, (Word)next_byte + (Word)X);
+			}
+			case CPU_ADDR_MODE_ZPY: {
+				// The 6502 wastes a cycle reading the unindexed ZP address
+				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				return fetch_one_byte(mmu, (Word)next_byte + (Word)Y);
+			}
+			case CPU_ADDR_MODE_ABS: {
+				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
+				Word address = (Word)next_byte | high_addr_byte;
+				return fetch_one_byte(mmu, address);
+			}
+			case CPU_ADDR_MODE_ABX: {
+				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
+				Word address = (Word)next_byte | high_addr_byte;
+				return fetch_one_byte(mmu, address + X); // TODO: Page boundary
+			}
+			case CPU_ADDR_MODE_ABY: {
+				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
+				Word address = (Word)next_byte | high_addr_byte;
+				return fetch_one_byte(mmu, address + Y); // TODO: Page boundary
+			}
+			case CPU_ADDR_MODE_ZPX_IND: {
+				// ZPX Indexed Indirect addressing typically fetches from an address stored in a table residing in ZP
+				Word address = (Word)fetch_one_byte(mmu, (Word)next_byte + X); // Read address from table
+				return fetch_one_byte(mmu, address); // Read from that address
+			}
+			case CPU_ADDR_MODE_ZPY_IND: {
+				Word low_addr_byte = (Word)fetch_one_byte(mmu, (Word)next_byte); // ZP contains LSByte
+				Word address = low_addr_byte + Y; // LSB + Y is address to fetch from
+				return fetch_one_byte(mmu, address); // Get it baby!
+			}
+			default: break;
+		}
+		return 0;
+	}
+
+	void auto_write_value(MMU& mmu, Byte next_byte, Byte addressing_mode, Byte value) {
+		// NOTE: Perhaps percolate some kind of error on invalid memory ops? (e.g. writing in immediate mode)
+		switch (addressing_mode) {
+			case CPU_ADDR_MODE_ACC:
+			A = value;
+			break;
+			case CPU_ADDR_MODE_ZPG:
+			write_one_byte(mmu, (Word)next_byte, value);
+			break;
+			case CPU_ADDR_MODE_ZPX: {
+				// The 6502 wastes a cycle reading the unindexed ZP address
+				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				write_one_byte(mmu, (Word)next_byte + (Word)X, value);
+				break;
+			}
+			case CPU_ADDR_MODE_ZPY: {
+				// The 6502 wastes a cycle reading the unindexed ZP address
+				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				write_one_byte(mmu, (Word)next_byte + (Word)Y, value);
+				break;
+			}
+			case CPU_ADDR_MODE_ABS: {
+				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
+				Word address = (Word)next_byte | high_addr_byte;
+				write_one_byte(mmu, address, value);
+				break;
+			}
+			case CPU_ADDR_MODE_ABX: {
+				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
+				Word address = (Word)next_byte | high_addr_byte;
+				write_one_byte(mmu, address + X, value); // TODO: Page boundary
+				break;
+			}
+			case CPU_ADDR_MODE_ABY: {
+				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
+				Word address = (Word)next_byte | high_addr_byte;
+				write_one_byte(mmu, address + Y, value); // TODO: Page boundary
+				break;
+			}
+			case CPU_ADDR_MODE_ZPX_IND: {
+				Word address = (Word)fetch_one_byte(mmu, (Word)next_byte + X);
+				write_one_byte(mmu, address, value);
+				break;
+			}
+			case CPU_ADDR_MODE_ZPY_IND: {
+				Word low_addr_byte = (Word)fetch_one_byte(mmu, (Word)next_byte);
+				Word address = low_addr_byte + Y;
+				write_one_byte(mmu, address, value);
+				break;
+			}
+			default: break;
+		}
+	}
+
+	// https://www.nesdev.org/obelisk-6502-guide/reference.html
+	// https://llx.com/Neil/a2/opcodes.html
+	CPUStatus exec_instruction(MMU& mmu) {
+		addr_bus_value = PC;
+		exec_cycle(mmu, CPU_UOP_FETCH);
+		Byte instruction = data_bus_value;
+		
+		// " All single-byte instructions waste a cycle reading and ignoring
+		//   the byte that comes immediately after the instruction. "
+		// - Sun Tzu, The Art of 6502
+		addr_bus_value = PC + 1;
+		exec_cycle(mmu, CPU_UOP_FETCH);
+		Byte next_byte = data_bus_value;
+
+		Byte aaa = (instruction & 0b11100000) >> 5; // Opcode
+		Byte bbb = (instruction & 0b00011100) >> 2; // Addressing Mode
+		Byte cc  = (instruction & 0b00000011);      // Opcode group
+		Byte final_addr_mode = decode_addr_mode(cc, bbb);
+
+		bool complex_instruction = false;
+		Word old_pc = PC;
+
+		// First we'll handle the stray one-byte instructions
+		switch (instruction) {
+			case 0xEA: break; // NOP
+			case 0x00: {
+				// BRK
+				Word to_push = PC + 2;
+				stack_push(mmu, to_push >> 8);
+				stack_push(mmu, to_push & 0xFF);
+				stack_push_status_flags(mmu);
+				SF |= CPU_FLAG_B;
+				Word interrupt_vector = ((Word)fetch_one_byte(mmu, 0xFFFE) << 8) | fetch_one_byte(mmu, 0xFFFF);
+				last_jump = PC;
+				PC = interrupt_vector - 1; // -1 to compensate for later PC++
+				break;
+			}
+			case 0x40:
+			// RTI
+			// TODO: Does flag B come from the stack or not???
+			stack_pull_status_flags(mmu); 
+			// Fall through, why not
+			case 0x60:
+			// RTS
+			last_jump = PC;
+			PC = stack_pull(mmu) | (stack_pull(mmu) << 8) - 1; // compensate for PC++
+			break;
+
+			// Flag manipulation instructions
+			case 0x18:
+			// CLC
+			set_flag(CPU_FLAG_C, 0);
+			break;
+			case 0x38:
+			// SEC
+			set_flag(CPU_FLAG_C, 1);
+			break;
+			case 0x58:
+			// CLI
+			set_flag(CPU_FLAG_I, 0);
+			break;
+			case 0x78:
+			// SEI
+			set_flag(CPU_FLAG_I, 1);
+			break;
+			case 0xB8:
+			// CLV
+			set_flag(CPU_FLAG_V, 0);
+			break;
+			case 0xD8:
+			// CLD
+			set_flag(CPU_FLAG_D, 0);
+			break;
+			case 0xF8:
+			// SED
+			set_flag(CPU_FLAG_D, 1);
+			break;
+
+			// Register transfer instructions
+			case 0xA8:
+			// TAY
+			A = Y;
+			set_flag(CPU_FLAG_Z, Y == 0);
+			set_flag(CPU_FLAG_N, Y & 0b10000000);
+			break;
+			case 0x98:
+			// TYA
+			A = Y;
+			set_flag(CPU_FLAG_Z, A == 0);
+			set_flag(CPU_FLAG_N, A & 0b10000000);
+			break;
+			case 0x9A:
+			// TXS
+			SP = X;
+			break;
+			case 0xBA:
+			// TSX
+			X = SP;
+			set_flag(CPU_FLAG_Z, X == 0);
+			set_flag(CPU_FLAG_N, X & 0b10000000);
+			break;
+
+			// Stack instructions
+			case 0x08:
+			// PHP
+			stack_push_status_flags(mmu);
+			break;
+			case 0x28:
+			// PLP
+			stack_pull_status_flags(mmu);
+			break;
+			case 0x48:
+			// PHA
+			stack_push(mmu, A);
+			break;
+			case 0x68:
+			// PLA
+			A = stack_pull(mmu);
+			set_flag(CPU_FLAG_Z, A == 0);
+			set_flag(CPU_FLAG_N, A & 0b10000000);
+			break;
+
+			// Increment and decrement instructions
+			case 0xC8:
+			// INY
+			Y++;
+			set_flag(CPU_FLAG_Z, Y == 0);
+			set_flag(CPU_FLAG_N, Y & 0b10000000);
+			break;
+			case 0x88:
+			// DEY
+			Y--;
+			set_flag(CPU_FLAG_Z, Y == 0);
+			set_flag(CPU_FLAG_N, Y & 0b10000000);
+			break;
+			case 0xE8:
+			// INX
+			X++;
+			set_flag(CPU_FLAG_Z, X == 0);
+			set_flag(CPU_FLAG_N, X & 0b10000000);
+			break;
+			case 0xCA:
+			// DEX
+			X--;
+			set_flag(CPU_FLAG_Z, X == 0);
+			set_flag(CPU_FLAG_N, X & 0b10000000);
+			break;
+
+			// Odd one out:
+			case 0x20:
+			// JSR
+			stack_push(mmu, PC + 2);
+			last_jump = PC;
+			PC = next_byte;
+			PC |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
+			// impl
+			break;
+
+			default: complex_instruction = true; break;
+		}
+
+		if (!complex_instruction) {
+			PC++;
+			return CONTINUE;
+		}
+
+		switch (cc) {
+			case 0b01: // Group 1
+			switch (aaa) {
+				case 0b000: {
+					// ORA - Logical OR
+					A |= auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_Z, A == 0);
+					set_flag(CPU_FLAG_N, A & 0b10000000);
+					break;
+				}
+				case 0b001: {
+					// AND - Logical AND
+					A &= auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_Z, A == 0);
+					set_flag(CPU_FLAG_N, A & 0b10000000);
+					break;
+				}
+				case 0b010: {
+					// EOR - Logical Exclusive OR
+					A ^= auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_Z, A == 0);
+					set_flag(CPU_FLAG_N, A & 0b10000000);
+					break;
+				}
+				case 0b011: {
+					// ADC - Add with Carry
+					Byte operand = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					Word result = (Word)A + operand + check_flag(CPU_FLAG_C);
+					A = result & 0xFF;
+					set_flag(CPU_FLAG_C, result > 0xFF);
+					set_flag(CPU_FLAG_Z, A == 0);
+					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
+					set_flag(CPU_FLAG_N, A & 0b10000000);
+					break;
+				}
+				case 0b100: {
+					// STA - Store Accumulator
+					auto_write_value(mmu, next_byte, final_addr_mode, A);
+					break;
+				}
+				case 0b101: {
+					// LDA - Load Accumulator
+					A = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_Z, A == 0);
+					set_flag(CPU_FLAG_N, A & 0b10000000);
+					break;
+				}
+				case 0b110: {
+					// CMP - Compare Accumulator
+					Byte compare_mem = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					
+					set_flag(CPU_FLAG_C, A >= compare_mem);
+					set_flag(CPU_FLAG_Z, A == compare_mem);
+					set_flag(CPU_FLAG_N, A <  compare_mem);
+					break;
+				}
+				case 0b111: {
+					// SBC - Subtract with Carry
+					Byte operand = ~auto_fetch_value(mmu, next_byte, final_addr_mode);
+					Word result = (Word)A + operand + check_flag(CPU_FLAG_C);
+					A = result & 0xFF;
+					set_flag(CPU_FLAG_C, result > 0xFF);
+					set_flag(CPU_FLAG_Z, A == 0);
+					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
+					set_flag(CPU_FLAG_N, A & 0b10000000);
+					break;
+				}
+				default:
+				PC++;
+				return INVALID;
+			}
+			auto_increment_pc(final_addr_mode);
+			break;
+			case 0b10: // Group 2
+			switch (aaa) {
+				case 0b000: {
+					// ASL - Arithmetic Shift Left
+					Byte to_shift = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_C, to_shift & 0b10000000);
+					to_shift <<= 1;
+					set_flag(CPU_FLAG_Z, to_shift == 0); // Documented incorrectly on NESdev?
+					set_flag(CPU_FLAG_N, to_shift & 0b10000000);
+					// TODO: Figure out how this works if we are in accumulator addressing mode
+					auto_write_value(mmu, next_byte, final_addr_mode, to_shift);
+					break;
+				}
+				case 0b001: {
+					// ROL - Rotate Left
+					Byte to_rotate = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					Byte old_carry = check_flag(CPU_FLAG_C);
+					set_flag(CPU_FLAG_C, to_rotate & 0b10000000);
+					to_rotate <<= 1;
+					to_rotate |= old_carry;
+					set_flag(CPU_FLAG_Z, to_rotate == 0); // Documented incorrectly on NESdev?
+					set_flag(CPU_FLAG_N, to_rotate & 0b10000000);
+					// TODO: Figure out how this works if we are in accumulator addressing mode
+					auto_write_value(mmu, next_byte, final_addr_mode, to_rotate);
+					break;
+				}
+				case 0b010: {
+					// LSR - Logical Shift Right
+					Byte to_shift = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_C, to_shift & 1);
+					to_shift >>= 1;
+					set_flag(CPU_FLAG_Z, to_shift == 0); // Weirdly differs from the others on NESdev
+					// TODO: Figure out how this works if we are in accumulator addressing mode
+					auto_write_value(mmu, next_byte, final_addr_mode, to_shift);
+					break;
+				}
+				case 0b011: {
+					// ROR - Rotate Right
+					Byte to_rotate = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					Byte old_carry = check_flag(CPU_FLAG_C);
+					set_flag(CPU_FLAG_C, to_rotate & 1);
+					to_rotate >>= 1;
+					to_rotate |= old_carry << 7;
+					set_flag(CPU_FLAG_Z, to_rotate == 0); // Documented incorrectly on NESdev?
+					set_flag(CPU_FLAG_N, to_rotate & 0b10000000);
+					// TODO: Figure out how this works if we are in accumulator addressing mode
+					auto_write_value(mmu, next_byte, final_addr_mode, to_rotate);
+					break;
+				}
+				case 0b100: {
+					// STX - Store X Register
+					// STX A = TXA
+
+					// Addressing mode quirk:
+					// zpx <-> zpy
+					// abx <-> aby
+					if (final_addr_mode == CPU_ADDR_MODE_ZPX)
+						final_addr_mode = CPU_ADDR_MODE_ZPY;
+					else if (final_addr_mode == CPU_ADDR_MODE_ZPY)
+						final_addr_mode = CPU_ADDR_MODE_ZPX;
+					else if (final_addr_mode == CPU_ADDR_MODE_ABX)
+						final_addr_mode = CPU_ADDR_MODE_ABY;
+					else if (final_addr_mode == CPU_ADDR_MODE_ABY)
+						final_addr_mode = CPU_ADDR_MODE_ABX;
+
+					// TODO: STX abs,Y is unassigned
+					auto_write_value(mmu, next_byte, final_addr_mode, X);
+
+					// TXA updates flags where STX doesn't
+					if (final_addr_mode == CPU_ADDR_MODE_ACC) {
+						set_flag(CPU_FLAG_Z, A == 0);
+						set_flag(CPU_FLAG_N, A & 0b10000000);
+					}
+					break;
+				}
+				case 0b101: {
+					// LDX - Load X Register
+					// LDX A = TAX exactly, apparently
+
+					// Addressing mode quirk:
+					// zpx <-> zpy
+					// abx <-> aby
+					if (final_addr_mode == CPU_ADDR_MODE_ZPX)
+						final_addr_mode = CPU_ADDR_MODE_ZPY;
+					else if (final_addr_mode == CPU_ADDR_MODE_ZPY)
+						final_addr_mode = CPU_ADDR_MODE_ZPX;
+					else if (final_addr_mode == CPU_ADDR_MODE_ABX)
+						final_addr_mode = CPU_ADDR_MODE_ABY;
+					else if (final_addr_mode == CPU_ADDR_MODE_ABY)
+						final_addr_mode = CPU_ADDR_MODE_ABX;
+					
+					X = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_Z, X == 0);
+					set_flag(CPU_FLAG_N, X & 0b10000000);
+					break;
+				}
+				case 0b110: {
+					// DEC - Decrement Memory
+					// DEC A is DEX but that is handled earlier
+					// TODO: Check if this uses the correct number of cycles
+					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					auto_write_value(mmu, next_byte, final_addr_mode, M - 1);
+					break;
+				}
+				case 0b111: {
+					// INC - Increment Memory
+					// INC A is NOP but that is handled earlier
+					// TODO: Check if this uses the correct number of cycles
+					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					auto_write_value(mmu, next_byte, final_addr_mode, M + 1);
+				}
+				default:
+				PC++;
+				return INVALID;
+			}
+			auto_increment_pc(final_addr_mode);
+			break;
+			case 0b00: // Group 3
+			if (bbb == 0b100) {
+				// Covers all conditional branch instructions
+				Byte untranslated_flag = aaa >> 1;
+				Byte condition = aaa & 1;
+				Word flag = 0;
+				switch (untranslated_flag) {
+					case 0: flag = CPU_FLAG_N; break;
+					case 1: flag = CPU_FLAG_V; break;
+					case 2: flag = CPU_FLAG_C; break;
+					case 3: flag = CPU_FLAG_Z;
+					default: break;
+				}
+
+				if (check_flag(flag) == condition) {
+					last_jump = PC;
+					stall_n_cycles(mmu, 1); // TODO: 2 if to a new page
+					Byte_S offset = next_byte;
+					PC += offset;
+				}
+				
+				PC += 2; // PC is always incremented by 2 here
+				break; // Prevents the switch(aaa) from running
+			}
+			switch (aaa) {
+				case 0b001: {
+					// BIT - Bit Test
+					Word address_to_test = next_byte;
+					if (bbb == 0b001) {
+						// Absolute mode
+						addr_bus_value = PC + 2;
+						exec_cycle(mmu, CPU_UOP_FETCH); // Get second byte of address to test
+						address_to_test |= ((Word)data_bus_value) << 8;
+						PC++;
+					}
+					
+					addr_bus_value = address_to_test;
+					exec_cycle(mmu, CPU_UOP_FETCH);
+					Byte result = A & data_bus_value;
+
+					set_flag(CPU_FLAG_Z, result == 0);
+					set_flag(CPU_FLAG_V, data_bus_value & 0b01000000);
+					set_flag(CPU_FLAG_N, data_bus_value & 0b10000000);
+
+					PC += 2;
+					break;
+				}
+				// llx.com gets these two backwards
+				case 0b010: {
+					// JMP - Absolute Jump
+					Word jump_target = next_byte;
+					jump_target |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
+					last_jump = PC;
+					PC = jump_target;
+					break;
+				}
+				case 0b011: {
+					// JMP - Indirect Jump
+					Word jump_target_location = next_byte;
+					jump_target_location |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
+					Word jump_target = fetch_one_byte(mmu, jump_target_location);
+					jump_target |= ((Word)fetch_one_byte(mmu, jump_target_location + 1)) << 8;
+					last_jump = PC;
+					PC = jump_target;
+					break;
+				}
+				case 0b100: {
+					// STY - Store Y Register
+					auto_write_value(mmu, next_byte, final_addr_mode, Y);
+					auto_increment_pc(final_addr_mode);
+					break;
+				}
+				case 0b101: {
+					// LDY - Load Y Register
+					Y = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					set_flag(CPU_FLAG_Z, Y == 0);
+					set_flag(CPU_FLAG_N, Y & 0b10000000);
+					auto_increment_pc(final_addr_mode);
+					break;
+				}
+				case 0b110: {
+					// CPY - Compare Y Register
+					Byte compare_mem = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					
+					set_flag(CPU_FLAG_C, Y >= compare_mem);
+					set_flag(CPU_FLAG_Z, Y == compare_mem);
+					set_flag(CPU_FLAG_N, Y <  compare_mem);
+					auto_increment_pc(final_addr_mode);
+					break;
+				}
+				case 0b111: {
+					// CPX - Compare X Register
+					Byte compare_mem = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					
+					set_flag(CPU_FLAG_C, X >= compare_mem);
+					set_flag(CPU_FLAG_Z, X == compare_mem);
+					set_flag(CPU_FLAG_N, X <  compare_mem);
+					auto_increment_pc(final_addr_mode);
+					break;
+				}
+				default:
+				PC++;
+				return INVALID;
+			}
+			break;
+			default:
+			PC++;
+			return INVALID;
+		}
+
+		last_good_instruction = old_pc;
+		if (PC == old_pc) return HALT;
+		return CONTINUE;
+	}
+};
+
+int main(int argc, char* argv[]) {
+	CPU cpu;
+	MMU mmu;
+	mmu.initialize();
+
+	if (argc > 1) {
+		std::cout << "Attempting to load ROM: " << argv[1] << std::endl;
+		std::ifstream rom_file(argv[1], std::ios::binary);
+		if (!rom_file) {
+			std::cerr << "Error: Could not open ROM file." << std::endl;
+			return 1;
+		}
+
+		char byte;
+		Word address = 0x0000;
+		while (rom_file.get(byte)) {
+			mmu.write_byte(address++, (Byte)byte);
+		}
+		rom_file.close();
+	} else {
+		std::cout << "No ROM provided." << std::endl;
+	}
+	
+	cpu.reset(mmu);
+	cpu.dump_state(mmu);
+	
+	std::string input;
+	bool running = true;
+	bool paused = true;
+	
+	std::cout << "\nPress Enter to execute next instruction or 'q' to quit\n";
+	
+	while (running) {
+		if (paused) {
+			std::getline(std::cin, input);
+			std::vector<std::string> command_parts;
+			char cmd;
+
+			if (input.length() > 0) {
+				std::istringstream splitter(input);
+				std::string current;
+
+				while (getline(splitter, current, ' ')) {
+					command_parts.push_back(current);
+				}
+
+				cmd = command_parts[0][0];
+			}
+			else {
+				cmd = ' ';
+			}
+			
+			if (cmd == 'q' || cmd == 'Q') {
+				std::cout << "Quitting emulator...\n";
+				running = false;
+				break;
+			}
+			else if (cmd == 'j' || cmd == 'J') {
+				Word location = std::stoi(command_parts[1]);
+				std::cout << "Jumping to 0x" << std::hex << (int)location << std::endl;
+				cpu.PC = location;
+				continue;
+			}
+			else if (cmd == 'r' || cmd == 'R') {
+				std::cout << "Running..." << std::endl;
+				paused = false;
+			}
+		}
+
+		
+		CPUStatus status = cpu.exec_instruction(mmu);
+
+		if (status == HALT) {
+			cpu.dump_state(mmu);
+			std::cout << "A halt was detected!" << std::endl;
+			paused = true;
+		}
+		else if (status == INVALID) {
+			cpu.dump_state(mmu);
+			std::cout << "The CPU encountered an invalid instruction!" << std::endl
+				<< "Execution may be resumed, but unexpected behavior could occur." << std::endl;
+			paused = true;
+		}
+	}
+
+	return 0;
+}
