@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <algorithm>
 #include "types.hpp"
 #include "helpers.hpp"
 #include "bin.hpp"
@@ -63,6 +64,8 @@ struct CPU {
 	Word last_good_instruction = 0;
 	Word last_jump_origin = 0;
 	Word last_jump_target = 0;
+
+	std::vector<Word> breakpoints;
 
 	void reset(MMU& mmu) {
 		A = 0;
@@ -299,7 +302,11 @@ struct CPU {
 
 	// https://www.nesdev.org/obelisk-6502-guide/reference.html
 	// https://llx.com/Neil/a2/opcodes.html
-	CPUStatus exec_instruction(MMU& mmu) {
+	CPUStatus exec_instruction(MMU& mmu, bool bypass_breakpoints) {
+		if (!bypass_breakpoints && std::count(breakpoints.begin(), breakpoints.end(), PC) > 0) {
+			return BREAKPOINT;
+		}
+
 		addr_bus_value = PC;
 		exec_cycle(mmu, CPU_UOP_FETCH);
 		Byte instruction = data_bus_value;
@@ -338,11 +345,18 @@ struct CPU {
 				PC = interrupt_vector - 1; // -1 to compensate for later PC++
 				break;
 			}
-			case 0x40:
-			// RTI
-			// TODO: Does flag B come from the stack or not???
-			stack_pull_status_flags(mmu); 
-			// Fall through, why not
+			case 0x40:{
+				// RTI
+				// TODO: Does flag B come from the stack or not???
+				stack_pull_status_flags(mmu);
+				Byte b_lo = stack_pull(mmu);
+				Byte b_hi = stack_pull(mmu);
+				Word target = make_address(b_lo, b_hi);
+				last_jump_origin = PC;
+				last_jump_target = target;
+				PC = target - 1; // Compensate
+				break;
+			}
 			case 0x60: {
 				// RTS
 				Byte b_lo = stack_pull(mmu);
@@ -824,10 +838,11 @@ int main(int argc, char* argv[]) {
 	std::cout << "\nPress Enter to execute next instruction or 'q' to quit\n";
 	
 	while (running) {
+		bool bypass_breakpoints = false;
 		if (paused) {
 			std::getline(std::cin, input);
 			std::vector<std::string> command_parts;
-			char cmd;
+			char cmd = ' ';
 
 			if (input.length() > 0) {
 				std::istringstream splitter(input);
@@ -840,7 +855,7 @@ int main(int argc, char* argv[]) {
 				cmd = command_parts[0][0];
 			}
 			else {
-				cmd = ' ';
+				bypass_breakpoints = true;
 			}
 			
 			if (cmd == 'q' || cmd == 'Q') {
@@ -854,14 +869,23 @@ int main(int argc, char* argv[]) {
 				cpu.PC = location;
 				continue;
 			}
+			else if (cmd == 'b' || cmd == 'B') {
+				Word location = static_cast<Word>(std::stoi(command_parts[1]));
+				std::cout << "Breakpoint set at 0x" << std::hex << (int)location << std::endl;
+				cpu.breakpoints.push_back(location);
+				continue;
+			}
 			else if (cmd == 'r' || cmd == 'R') {
 				std::cout << "Running..." << std::endl;
 				paused = false;
 			}
+			else {
+				std::cout << "Stepping one instruction." << std::endl;
+				bypass_breakpoints = true;
+			}
 		}
-
 		
-		CPUStatus status = cpu.exec_instruction(mmu);
+		CPUStatus status = cpu.exec_instruction(mmu, bypass_breakpoints);
 
 		if (status == HALT) {
 			cpu.dump_state(mmu);
@@ -872,6 +896,11 @@ int main(int argc, char* argv[]) {
 			cpu.dump_state(mmu);
 			std::cout << "The CPU encountered an invalid instruction!" << std::endl
 				<< "Execution may be resumed, but unexpected behavior could occur." << std::endl;
+			paused = true;
+		}
+		else if (status == BREAKPOINT) {
+			cpu.dump_state(mmu);
+			std::cout << "Breakpoint hit!" << std::endl;
 			paused = true;
 		}
 	}

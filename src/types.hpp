@@ -34,5 +34,6 @@ static constexpr Byte CPU_ADDR_MODE_INVALID = 0b1111;
 enum CPUStatus {
 	CONTINUE = 0,
 	HALT,
-	INVALID
+	INVALID,
+	BREAKPOINT
 };
