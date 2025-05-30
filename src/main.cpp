@@ -342,7 +342,9 @@ struct CPU {
 			// Fall through, why not
 			case 0x60: {
 				// RTS
-				Word target = stack_pull(mmu) | (widen(stack_pull(mmu)) << 8);
+				Byte b_lo = stack_pull(mmu);
+				Byte b_hi = stack_pull(mmu);
+				Word target = make_address(b_lo, b_hi);
 				last_jump_origin = PC;
 				last_jump_target = target;
 				PC = target - 1; // compensate for PC++
@@ -716,8 +718,7 @@ struct CPU {
 				// llx.com gets these two backwards
 				case 0b010: {
 					// JMP - Absolute Jump
-					Word jump_target = next_byte;
-					jump_target |= static_cast<Word>(widen(fetch_one_byte(mmu, PC + 2)) << 8);
+					Word jump_target = make_address(next_byte, fetch_one_byte(mmu, PC + 2));
 					last_jump_origin = PC;
 					last_jump_target = jump_target;
 					PC = jump_target;
@@ -725,10 +726,8 @@ struct CPU {
 				}
 				case 0b011: {
 					// JMP - Indirect Jump
-					Word jump_target_location = next_byte;
-					jump_target_location |= static_cast<Word>(widen(fetch_one_byte(mmu, PC + 2)) << 8);
-					Word jump_target = fetch_one_byte(mmu, jump_target_location);
-					jump_target |= static_cast<Word>(widen(fetch_one_byte(mmu, jump_target_location + 1)) << 8);
+					Word jump_target_location = make_address(next_byte, fetch_one_byte(mmu, PC + 2));
+					Word jump_target = make_address(fetch_one_byte(mmu, jump_target_location), fetch_one_byte(mmu, jump_target_location + 1));
 					last_jump_origin = PC;
 					last_jump_target = jump_target;
 					PC = jump_target;
