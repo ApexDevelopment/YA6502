@@ -721,8 +721,8 @@ struct CPU {
 			switch (aaa) {
 				case 0b001: {
 					// BIT - Bit Test
-					Word address_to_test = next_byte;
-					if (bbb == 0b001) {
+					Word address_to_test = widen(next_byte);
+					if (bbb == 0b011) {
 						// Absolute mode
 						addr_bus_value = PC + 2;
 						exec_cycle(mmu, CPU_UOP_FETCH); // Get second byte of address to test
