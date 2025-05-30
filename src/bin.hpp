@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <bitset>
 #include <type_traits>

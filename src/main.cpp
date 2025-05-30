@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include "types.hpp"
+#include "helpers.hpp"
 #include "bin.hpp"
 #include "rampage.cpp"
 
@@ -18,21 +19,21 @@ struct MMU {
 	}
 
 	Byte read_byte(Word address) {
-		Byte page_num = (Byte)((address & 0xFF00) >> 8);
-		Byte page_addr = (Byte)(address & 0xFF_b);
+		Byte page_num = hi(address);
+		Byte page_addr = lo(address);
 		return pages[page_num]->read_byte(page_addr);
 	}
 
 	void write_byte(Word address, Byte value) {
-		Byte page_num = (Byte)((address & 0xFF00) >> 8);
-		Byte page_addr = (Byte)(address & 0xFF_b);
+		Byte page_num = hi(address);
+		Byte page_addr = lo(address);
 		pages[page_num]->write_byte(page_addr, value);
 	}
 
 	Word read_word(Word address) {
 		// Little-endian
-		Word byte_lo = (Word)read_byte(address);
-		Word byte_hi = (Word)read_byte(address + 1) << 8;
+		Word byte_lo = widen(read_byte(address));
+		Word byte_hi = widen(read_byte(address + 1)) << 8;
 		return byte_lo | byte_hi;
 	}
 };
@@ -201,40 +202,40 @@ struct CPU {
 			case CPU_ADDR_MODE_ACC:
 			return A;
 			case CPU_ADDR_MODE_ZPG:
-			return fetch_one_byte(mmu, (Word)next_byte);
+			return fetch_one_byte(mmu, widen(next_byte));
 			case CPU_ADDR_MODE_ZPX: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				(void)fetch_one_byte(mmu, (Word)next_byte);
-				return fetch_one_byte(mmu, (Word)next_byte + (Word)X);
+				(void)fetch_one_byte(mmu, widen(next_byte));
+				return fetch_one_byte(mmu, widen(next_byte) + X);
 			}
 			case CPU_ADDR_MODE_ZPY: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				(void)fetch_one_byte(mmu, (Word)next_byte);
-				return fetch_one_byte(mmu, (Word)next_byte + (Word)Y);
+				(void)fetch_one_byte(mmu, widen(next_byte));
+				return fetch_one_byte(mmu, widen(next_byte) + Y);
 			}
 			case CPU_ADDR_MODE_ABS: {
-				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
-				Word address = (Word)next_byte | high_addr_byte;
+				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
+				Word address = widen(next_byte) | high_addr_byte;
 				return fetch_one_byte(mmu, address);
 			}
 			case CPU_ADDR_MODE_ABX: {
-				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
-				Word address = (Word)next_byte | high_addr_byte;
+				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
+				Word address = widen(next_byte) | high_addr_byte;
 				return fetch_one_byte(mmu, address + X); // TODO: Page boundary
 			}
 			case CPU_ADDR_MODE_ABY: {
-				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
-				Word address = (Word)next_byte | high_addr_byte;
+				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
+				Word address = widen(next_byte) | high_addr_byte;
 				return fetch_one_byte(mmu, address + Y); // TODO: Page boundary
 			}
 			case CPU_ADDR_MODE_ZPX_IND: {
 				// ZPX Indexed Indirect addressing typically fetches from an address stored in a table residing in ZP
-				Word address = (Word)fetch_one_byte(mmu, (Word)next_byte + X); // Read address from table
+				Word address = widen(fetch_one_byte(mmu, widen(next_byte) + X)); // Read address from table
 				return fetch_one_byte(mmu, address); // Read from that address
 			}
 			case CPU_ADDR_MODE_ZPY_IND: {
-				Word low_addr_byte = (Word)fetch_one_byte(mmu, (Word)next_byte); // ZP contains LSByte
-				Word address = low_addr_byte + Y; // LSB + Y is address to fetch from
+				Word low_addr_byte = widen(fetch_one_byte(mmu, widen(next_byte))); // ZP contains LSByte
+				Word address = low_addr_byte + Y; // LSByte + Y is address to fetch from
 				return fetch_one_byte(mmu, address); // Get it baby!
 			}
 			default: break;
@@ -249,45 +250,45 @@ struct CPU {
 			A = value;
 			break;
 			case CPU_ADDR_MODE_ZPG:
-			write_one_byte(mmu, (Word)next_byte, value);
+			write_one_byte(mmu, widen(next_byte), value);
 			break;
 			case CPU_ADDR_MODE_ZPX: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				(void)fetch_one_byte(mmu, (Word)next_byte);
-				write_one_byte(mmu, (Word)next_byte + (Word)X, value);
+				(void)fetch_one_byte(mmu, widen(next_byte));
+				write_one_byte(mmu, widen(next_byte) + X, value);
 				break;
 			}
 			case CPU_ADDR_MODE_ZPY: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				(void)fetch_one_byte(mmu, (Word)next_byte);
-				write_one_byte(mmu, (Word)next_byte + (Word)Y, value);
+				(void)fetch_one_byte(mmu, widen(next_byte));
+				write_one_byte(mmu, widen(next_byte) + Y, value);
 				break;
 			}
 			case CPU_ADDR_MODE_ABS: {
-				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
-				Word address = (Word)next_byte | high_addr_byte;
+				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
+				Word address = widen(next_byte) | high_addr_byte;
 				write_one_byte(mmu, address, value);
 				break;
 			}
 			case CPU_ADDR_MODE_ABX: {
-				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
-				Word address = (Word)next_byte | high_addr_byte;
+				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2) << 8);
+				Word address = widen(next_byte) | high_addr_byte;
 				write_one_byte(mmu, address + X, value); // TODO: Page boundary
 				break;
 			}
 			case CPU_ADDR_MODE_ABY: {
-				Word high_addr_byte = (Word)fetch_one_byte(mmu, PC + 2) << 8;
-				Word address = (Word)next_byte | high_addr_byte;
+				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
+				Word address = widen(next_byte) | high_addr_byte;
 				write_one_byte(mmu, address + Y, value); // TODO: Page boundary
 				break;
 			}
 			case CPU_ADDR_MODE_ZPX_IND: {
-				Word address = (Word)fetch_one_byte(mmu, (Word)next_byte + X);
+				Word address = widen(fetch_one_byte(mmu, widen(next_byte) + X));
 				write_one_byte(mmu, address, value);
 				break;
 			}
 			case CPU_ADDR_MODE_ZPY_IND: {
-				Word low_addr_byte = (Word)fetch_one_byte(mmu, (Word)next_byte);
+				Word low_addr_byte = widen(fetch_one_byte(mmu, widen(next_byte)));
 				Word address = low_addr_byte + Y;
 				write_one_byte(mmu, address, value);
 				break;
@@ -324,11 +325,11 @@ struct CPU {
 			case 0x00: {
 				// BRK
 				Word to_push = PC + 2;
-				stack_push(mmu, (Byte)(to_push >> 8));
-				stack_push(mmu, (Byte)(to_push & 0xFF_b));
+				stack_push(mmu, hi(to_push));
+				stack_push(mmu, lo(to_push));
 				stack_push_status_flags(mmu);
 				SF |= CPU_FLAG_B;
-				Word interrupt_vector = ((Word)fetch_one_byte(mmu, 0xFFFE) << 8) | fetch_one_byte(mmu, 0xFFFF);
+				Word interrupt_vector = (widen(fetch_one_byte(mmu, 0xFFFE)) << 8) | fetch_one_byte(mmu, 0xFFFF);
 				last_jump_origin = PC;
 				last_jump_target = interrupt_vector;
 				PC = interrupt_vector - 1; // -1 to compensate for later PC++
@@ -341,7 +342,7 @@ struct CPU {
 			// Fall through, why not
 			case 0x60: {
 				// RTS
-				Word target = stack_pull(mmu) | (stack_pull(mmu) << 8);
+				Word target = stack_pull(mmu) | (widen(stack_pull(mmu)) << 8);
 				last_jump_origin = PC;
 				last_jump_target = target;
 				PC = target - 1; // compensate for PC++
@@ -452,9 +453,9 @@ struct CPU {
 			case 0x20: {
 				// JSR
 				Word return_addr = PC + 2;
-				stack_push(mmu, (Byte)(return_addr >> 8));
-				stack_push(mmu, (Byte)(return_addr & 0xFF_b));
-				Word target = next_byte | (((Word)fetch_one_byte(mmu, PC + 2)) << 8);
+				stack_push(mmu, hi(return_addr));
+				stack_push(mmu, lo(return_addr));
+				Word target = next_byte | (widen(fetch_one_byte(mmu, PC + 2)) << 8);
 				last_jump_origin = PC;
 				last_jump_target = target;
 				PC = target - 1; // Compensate
@@ -497,10 +498,10 @@ struct CPU {
 					// ADC - Add with Carry
 					Byte operand = auto_fetch_value(mmu, next_byte, final_addr_mode);
 					Word result = static_cast<Word>(
-						static_cast<Word>(A)
-						+ static_cast<Word>(operand)
-						+ static_cast<Word>(check_flag(CPU_FLAG_C)));
-					A = (Byte)(result & 0xFF);
+						widen(A)
+						+ widen(operand)
+						+ widen(check_flag(CPU_FLAG_C)));
+					A = lo(result);
 					set_flag(CPU_FLAG_C, result > 0xFF);
 					set_flag(CPU_FLAG_Z, A == 0);
 					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
@@ -532,10 +533,10 @@ struct CPU {
 					// SBC - Subtract with Carry
 					Byte operand = ~auto_fetch_value(mmu, next_byte, final_addr_mode);
 					Word result = static_cast<Word>(
-						static_cast<Word>(A)
-						+ static_cast<Word>(operand)
-						+ static_cast<Word>(check_flag(CPU_FLAG_C)));
-					A = (Byte)(result & 0xFF);
+						widen(A)
+						+ widen(operand)
+						+ widen(check_flag(CPU_FLAG_C)));
+					A = lo(result);
 					set_flag(CPU_FLAG_C, result > 0xFF);
 					set_flag(CPU_FLAG_Z, A == 0);
 					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
@@ -682,7 +683,7 @@ struct CPU {
 				if (check_flag(flag) == condition) {
 					last_jump_origin = PC;
 					stall_n_cycles(mmu, 1); // TODO: 2 if to a new page
-					PC = (Word)(PC + (Byte_S)next_byte); // Convert to signed type to do signed addition
+					PC = static_cast<Word>(PC + (Byte_S)next_byte); // Convert to signed type to do signed addition
 					last_jump_target = PC;
 				}
 				
@@ -697,7 +698,7 @@ struct CPU {
 						// Absolute mode
 						addr_bus_value = PC + 2;
 						exec_cycle(mmu, CPU_UOP_FETCH); // Get second byte of address to test
-						address_to_test |= ((Word)data_bus_value) << 8;
+						address_to_test |= static_cast<Word>(widen(data_bus_value) << 8);
 						PC++;
 					}
 					
@@ -716,7 +717,7 @@ struct CPU {
 				case 0b010: {
 					// JMP - Absolute Jump
 					Word jump_target = next_byte;
-					jump_target |= (Word)(((Word)fetch_one_byte(mmu, PC + 2)) << 8);
+					jump_target |= static_cast<Word>(widen(fetch_one_byte(mmu, PC + 2)) << 8);
 					last_jump_origin = PC;
 					last_jump_target = jump_target;
 					PC = jump_target;
@@ -725,9 +726,9 @@ struct CPU {
 				case 0b011: {
 					// JMP - Indirect Jump
 					Word jump_target_location = next_byte;
-					jump_target_location |= (Word)(((Word)fetch_one_byte(mmu, PC + 2)) << 8);
+					jump_target_location |= static_cast<Word>(widen(fetch_one_byte(mmu, PC + 2)) << 8);
 					Word jump_target = fetch_one_byte(mmu, jump_target_location);
-					jump_target |= (Word)(((Word)fetch_one_byte(mmu, jump_target_location + 1)) << 8);
+					jump_target |= static_cast<Word>(widen(fetch_one_byte(mmu, jump_target_location + 1)) << 8);
 					last_jump_origin = PC;
 					last_jump_target = jump_target;
 					PC = jump_target;
@@ -799,7 +800,7 @@ int main(int argc, char* argv[]) {
 		char byte;
 		Word address = 0x0000;
 		while (rom_file.get(byte)) {
-			mmu.write_byte(address++, (Byte)byte);
+			mmu.write_byte(address++, static_cast<Byte>(byte));
 		}
 		rom_file.close();
 	} else {
