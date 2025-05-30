@@ -4,8 +4,8 @@
 
 class MemoryPage {
 public:
-    virtual ~MemoryPage() {}
+	virtual ~MemoryPage() {}
 
-    virtual Byte read_byte(Byte address) const = 0;
-    virtual void write_byte(Byte address, Byte value) = 0;
+	virtual Byte read_byte(Byte address) const = 0;
+	virtual void write_byte(Byte address, Byte value) = 0;
 };
