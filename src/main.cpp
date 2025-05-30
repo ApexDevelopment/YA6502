@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <algorithm>
+#include <iomanip>
 #include "types.hpp"
 #include "helpers.hpp"
 #include "bin.hpp"
@@ -107,6 +108,15 @@ struct CPU {
 		std::cout << "Last known good instruction was at 0x" << std::hex << (int)last_good_instruction << std::endl;
 		std::cout << "How did we get here? 0x" << std::hex << (int)last_jump_origin
 			<< " jumped to 0x" << std::hex << (int)last_jump_target << std::endl;
+	}
+
+	std::string log_state(MMU& mmu) {
+		Byte instruction = mmu.read_byte(PC);
+		std::ostringstream oss;
+		oss << std::hex << std::setw(4) << std::setfill('0') << (int)PC;
+		oss << " " << std::hex << std::setw(2) << std::setfill('0') << (int)instruction;
+		std::string result = oss.str();
+		return result;
 	}
 
 	void exec_cycle(MMU& mmu, Byte micro_op) {
@@ -842,6 +852,9 @@ int main(int argc, char* argv[]) {
 	cpu.dump_state(mmu);
 	
 	std::string input;
+	std::string logfile;
+	std::ofstream logfile_stream;
+	bool logging = false;
 	bool running = true;
 	bool paused = true;
 	
@@ -872,6 +885,17 @@ int main(int argc, char* argv[]) {
 				std::cout << "Quitting emulator...\n";
 				running = false;
 				break;
+			}
+			else if (cmd == 'l' || cmd == 'L') {
+				if (command_parts.size() > 1) {
+					logfile = command_parts[1];
+					logging = true;
+					std::cout << "Logging to '" << logfile << "'" << std::endl;
+				}
+				else {
+					std::cout << "Please specify a file path to log to." << std::endl;
+				}
+				continue;
 			}
 			else if (cmd == 'j' || cmd == 'J') {
 				try {
@@ -908,7 +932,15 @@ int main(int argc, char* argv[]) {
 				bypass_breakpoints = true;
 			}
 		}
-		
+
+		if (logging) {
+			if (!logfile_stream.is_open()) {
+				logfile_stream.open(logfile);
+			}
+
+			logfile_stream << cpu.log_state(mmu) << std::endl;
+		}
+
 		CPUStatus status = cpu.exec_instruction(mmu, bypass_breakpoints);
 
 		if (status == HALT) {
@@ -928,6 +960,8 @@ int main(int argc, char* argv[]) {
 			paused = true;
 		}
 	}
+
+	logfile_stream.close();
 
 	return 0;
 }
