@@ -404,7 +404,7 @@ struct CPU {
 			// Register transfer instructions
 			case 0xA8:
 			// TAY
-			A = Y;
+			Y = A;
 			set_flag(CPU_FLAG_Z, Y == 0);
 			set_flag(CPU_FLAG_N, Y & 0b10000000);
 			break;
