@@ -59,7 +59,8 @@ struct CPU {
 	Byte data_bus_value = 0;
 
 	Word last_good_instruction = 0;
-	Word last_jump = 0;
+	Word last_jump_origin = 0;
+	Word last_jump_target = 0;
 
 	void reset(MMU& mmu) {
 		A = 0;
@@ -98,7 +99,8 @@ struct CPU {
 		std::cout << "PC: 0x" << std::hex <<      PC << std::endl;
 		std::cout << "SF: 0x" << std::hex << (int)SF << std::endl << std::endl;
 		std::cout << "Last known good instruction was at 0x" << std::hex << (int)last_good_instruction << std::endl;
-		std::cout << "How did we get here? 0x" << std::hex << (int)last_jump << std::endl;
+		std::cout << "How did we get here? 0x" << std::hex << (int)last_jump_origin
+			<< " jumped to 0x" << std::hex << (int)last_jump_target << std::endl;
 	}
 
 	void exec_cycle(MMU& mmu, Byte micro_op) {
@@ -326,7 +328,8 @@ struct CPU {
 				stack_push_status_flags(mmu);
 				SF |= CPU_FLAG_B;
 				Word interrupt_vector = ((Word)fetch_one_byte(mmu, 0xFFFE) << 8) | fetch_one_byte(mmu, 0xFFFF);
-				last_jump = PC;
+				last_jump_origin = PC;
+				last_jump_target = interrupt_vector;
 				PC = interrupt_vector - 1; // -1 to compensate for later PC++
 				break;
 			}
@@ -335,11 +338,14 @@ struct CPU {
 			// TODO: Does flag B come from the stack or not???
 			stack_pull_status_flags(mmu); 
 			// Fall through, why not
-			case 0x60:
-			// RTS
-			last_jump = PC;
-			PC = stack_pull(mmu) | (stack_pull(mmu) << 8) - 1; // compensate for PC++
-			break;
+			case 0x60: {
+				// RTS
+				Word target = stack_pull(mmu) | (stack_pull(mmu) << 8);
+				last_jump_origin = PC;
+				last_jump_target = target;
+				PC = target - 1; // compensate for PC++
+				break;
+			}
 
 			// Flag manipulation instructions
 			case 0x18:
@@ -442,14 +448,15 @@ struct CPU {
 			break;
 
 			// Odd one out:
-			case 0x20:
-			// JSR
-			stack_push(mmu, PC + 2);
-			last_jump = PC;
-			PC = next_byte;
-			PC |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
-			// impl
-			break;
+			case 0x20: {
+				// JSR
+				stack_push(mmu, PC + 2);
+				Word target = next_byte | (((Word)fetch_one_byte(mmu, PC + 2)) << 8);
+				last_jump_origin = PC;
+				last_jump_target = target;
+				PC = target - 1; // Compensate
+				break;
+			}
 
 			default: complex_instruction = true; break;
 		}
@@ -664,10 +671,11 @@ struct CPU {
 				}
 
 				if (check_flag(flag) == condition) {
-					last_jump = PC;
+					last_jump_origin = PC;
 					stall_n_cycles(mmu, 1); // TODO: 2 if to a new page
 					Byte_S offset = next_byte;
 					PC += offset;
+					last_jump_target = PC;
 				}
 				
 				PC += 2; // PC is always incremented by 2 here
@@ -701,7 +709,8 @@ struct CPU {
 					// JMP - Absolute Jump
 					Word jump_target = next_byte;
 					jump_target |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
-					last_jump = PC;
+					last_jump_origin = PC;
+					last_jump_target = jump_target;
 					PC = jump_target;
 					break;
 				}
@@ -711,7 +720,8 @@ struct CPU {
 					jump_target_location |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
 					Word jump_target = fetch_one_byte(mmu, jump_target_location);
 					jump_target |= ((Word)fetch_one_byte(mmu, jump_target_location + 1)) << 8;
-					last_jump = PC;
+					last_jump_origin = PC;
+					last_jump_target = jump_target;
 					PC = jump_target;
 					break;
 				}
