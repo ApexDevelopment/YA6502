@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 14)
 
 set(SRC_FILES
 	src/main.cpp
-	src/page.cpp
+	src/rampage.cpp
 )
 
 add_executable(main ${SRC_FILES})

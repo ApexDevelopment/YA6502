@@ -1,9 +1,13 @@
+#include <algorithm>
+#include <array>
 #include "types.hpp"
 #include "page.hpp"
 
-class Page : public MemoryPage {
+class RAMPage : public MemoryPage {
 public:
-    Page() : data() {}
+    RAMPage() {
+        std::fill(data.begin(), data.end(), 0);
+    }
 
     Byte read_byte(Byte address) const {
         return data[address];
@@ -14,5 +18,5 @@ public:
     }
 
 private:
-    Byte data[256];
+    std::array<Byte, 256> data;;
 };

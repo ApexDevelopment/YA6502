@@ -6,14 +6,14 @@
 #include <memory>
 #include "types.hpp"
 #include "bin.hpp"
-#include "page.cpp"
+#include "rampage.cpp"
 
 struct MMU {
-	MemoryPage* pages[256];
+	std::unique_ptr<MemoryPage> pages[256];
 
 	void initialize() {
 		for (int i = 0; i < 256; i++) {
-			pages[i] = new Page();
+			pages[i] = std::make_unique<RAMPage>();
 		}
 	}
 
