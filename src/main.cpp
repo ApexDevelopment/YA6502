@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "types.hpp"
+#include "bin.hpp"
 #include "page.hpp"
 #include "page.cpp"
 
@@ -97,7 +98,7 @@ struct CPU {
 		std::cout << "Y: 0x"  << std::hex << (int)Y  << std::endl;
 		std::cout << "SP: 0x" << std::hex << (int)SP << std::endl;
 		std::cout << "PC: 0x" << std::hex <<      PC << std::endl;
-		std::cout << "SF: 0x" << std::hex << (int)SF << std::endl << std::endl;
+		std::cout << "SF: 0b" << bin << (int)SF << std::endl << std::endl;
 		std::cout << "Last known good instruction was at 0x" << std::hex << (int)last_good_instruction << std::endl;
 		std::cout << "How did we get here? 0x" << std::hex << (int)last_jump_origin
 			<< " jumped to 0x" << std::hex << (int)last_jump_target << std::endl;
