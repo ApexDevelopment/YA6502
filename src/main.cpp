@@ -209,12 +209,12 @@ struct CPU {
 			case CPU_ADDR_MODE_ZPX: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
 				(void)fetch_one_byte(mmu, widen(next_byte));
-				return fetch_one_byte(mmu, widen(next_byte) + X);
+				return fetch_one_byte(mmu, lo(widen(next_byte) + X));
 			}
 			case CPU_ADDR_MODE_ZPY: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
 				(void)fetch_one_byte(mmu, widen(next_byte));
-				return fetch_one_byte(mmu, widen(next_byte) + Y);
+				return fetch_one_byte(mmu, lo(widen(next_byte) + Y));
 			}
 			case CPU_ADDR_MODE_ABS: {
 				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
@@ -233,7 +233,7 @@ struct CPU {
 			}
 			case CPU_ADDR_MODE_ZPX_IND: {
 				// ZPX Indexed Indirect addressing typically fetches from an address stored in a table residing in ZP
-				Word address = widen(fetch_one_byte(mmu, widen(next_byte) + X)); // Read address from table
+				Word address = widen(fetch_one_byte(mmu, lo(widen(next_byte) + X))); // Read address from table
 				return fetch_one_byte(mmu, address); // Read from that address
 			}
 			case CPU_ADDR_MODE_ZPY_IND: {
@@ -258,13 +258,13 @@ struct CPU {
 			case CPU_ADDR_MODE_ZPX: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
 				(void)fetch_one_byte(mmu, widen(next_byte));
-				write_one_byte(mmu, widen(next_byte) + X, value);
+				write_one_byte(mmu, lo(widen(next_byte) + X), value);
 				break;
 			}
 			case CPU_ADDR_MODE_ZPY: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
 				(void)fetch_one_byte(mmu, widen(next_byte));
-				write_one_byte(mmu, widen(next_byte) + Y, value);
+				write_one_byte(mmu, lo(widen(next_byte) + Y), value);
 				break;
 			}
 			case CPU_ADDR_MODE_ABS: {
@@ -286,7 +286,7 @@ struct CPU {
 				break;
 			}
 			case CPU_ADDR_MODE_ZPX_IND: {
-				Word address = widen(fetch_one_byte(mmu, widen(next_byte) + X));
+				Word address = widen(fetch_one_byte(mmu, lo(widen(next_byte) + X)));
 				write_one_byte(mmu, address, value);
 				break;
 			}
