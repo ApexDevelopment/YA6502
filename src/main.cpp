@@ -19,13 +19,13 @@ struct MMU {
 
 	Byte read_byte(Word address) {
 		Byte page_num = (Byte)((address & 0xFF00) >> 8);
-		Byte page_addr = address & 0xFF;
+		Byte page_addr = (Byte)(address & 0xFF_b);
 		return pages[page_num]->read_byte(page_addr);
 	}
 
 	void write_byte(Word address, Byte value) {
 		Byte page_num = (Byte)((address & 0xFF00) >> 8);
-		Byte page_addr = address & 0xFF;
+		Byte page_addr = (Byte)(address & 0xFF_b);
 		pages[page_num]->write_byte(page_addr, value);
 	}
 
@@ -72,7 +72,7 @@ struct CPU {
 		SF = 0b00110100; // Processor status. No interrupts, no decimal mode, set break flag
 	}
 
-	void set_flag(Word flag, Byte value) {
+	void set_flag(Byte flag, Byte value) {
 		if (value == 0) {
 			SF &= ~flag;
 		} else {
@@ -80,7 +80,7 @@ struct CPU {
 		}
 	}
 
-	Byte check_flag(Word flag) {
+	Byte check_flag(Byte flag) {
 		if (SF & flag) {
 			return 1;
 		}
@@ -121,7 +121,7 @@ struct CPU {
 
 	void stall_n_cycles(MMU& mmu, int n_cycles) {
 		// Could probably just cycle_count+=n_cycles but whatever
-		for (n_cycles; n_cycles >= 0; n_cycles--) {
+		for (; n_cycles >= 0; n_cycles--) {
 			exec_cycle(mmu, CPU_UOP_NONE);
 		}
 	}
@@ -204,12 +204,12 @@ struct CPU {
 			return fetch_one_byte(mmu, (Word)next_byte);
 			case CPU_ADDR_MODE_ZPX: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				(void)fetch_one_byte(mmu, (Word)next_byte);
 				return fetch_one_byte(mmu, (Word)next_byte + (Word)X);
 			}
 			case CPU_ADDR_MODE_ZPY: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				(void)fetch_one_byte(mmu, (Word)next_byte);
 				return fetch_one_byte(mmu, (Word)next_byte + (Word)Y);
 			}
 			case CPU_ADDR_MODE_ABS: {
@@ -253,13 +253,13 @@ struct CPU {
 			break;
 			case CPU_ADDR_MODE_ZPX: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				(void)fetch_one_byte(mmu, (Word)next_byte);
 				write_one_byte(mmu, (Word)next_byte + (Word)X, value);
 				break;
 			}
 			case CPU_ADDR_MODE_ZPY: {
 				// The 6502 wastes a cycle reading the unindexed ZP address
-				Byte discard = fetch_one_byte(mmu, (Word)next_byte);
+				(void)fetch_one_byte(mmu, (Word)next_byte);
 				write_one_byte(mmu, (Word)next_byte + (Word)Y, value);
 				break;
 			}
@@ -324,8 +324,8 @@ struct CPU {
 			case 0x00: {
 				// BRK
 				Word to_push = PC + 2;
-				stack_push(mmu, to_push >> 8);
-				stack_push(mmu, to_push & 0xFF);
+				stack_push(mmu, (Byte)(to_push >> 8));
+				stack_push(mmu, (Byte)(to_push & 0xFF_b));
 				stack_push_status_flags(mmu);
 				SF |= CPU_FLAG_B;
 				Word interrupt_vector = ((Word)fetch_one_byte(mmu, 0xFFFE) << 8) | fetch_one_byte(mmu, 0xFFFF);
@@ -451,7 +451,9 @@ struct CPU {
 			// Odd one out:
 			case 0x20: {
 				// JSR
-				stack_push(mmu, PC + 2);
+				Word return_addr = PC + 2;
+				stack_push(mmu, (Byte)(return_addr >> 8));
+				stack_push(mmu, (Byte)(return_addr & 0xFF_b));
 				Word target = next_byte | (((Word)fetch_one_byte(mmu, PC + 2)) << 8);
 				last_jump_origin = PC;
 				last_jump_target = target;
@@ -494,8 +496,11 @@ struct CPU {
 				case 0b011: {
 					// ADC - Add with Carry
 					Byte operand = auto_fetch_value(mmu, next_byte, final_addr_mode);
-					Word result = (Word)A + operand + check_flag(CPU_FLAG_C);
-					A = result & 0xFF;
+					Word result = static_cast<Word>(
+						static_cast<Word>(A)
+						+ static_cast<Word>(operand)
+						+ static_cast<Word>(check_flag(CPU_FLAG_C)));
+					A = (Byte)(result & 0xFF);
 					set_flag(CPU_FLAG_C, result > 0xFF);
 					set_flag(CPU_FLAG_Z, A == 0);
 					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
@@ -526,8 +531,11 @@ struct CPU {
 				case 0b111: {
 					// SBC - Subtract with Carry
 					Byte operand = ~auto_fetch_value(mmu, next_byte, final_addr_mode);
-					Word result = (Word)A + operand + check_flag(CPU_FLAG_C);
-					A = result & 0xFF;
+					Word result = static_cast<Word>(
+						static_cast<Word>(A)
+						+ static_cast<Word>(operand)
+						+ static_cast<Word>(check_flag(CPU_FLAG_C)));
+					A = (Byte)(result & 0xFF);
 					set_flag(CPU_FLAG_C, result > 0xFF);
 					set_flag(CPU_FLAG_Z, A == 0);
 					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
@@ -662,7 +670,7 @@ struct CPU {
 				// Covers all conditional branch instructions
 				Byte untranslated_flag = aaa >> 1;
 				Byte condition = aaa & 1;
-				Word flag = 0;
+				Byte flag = 0;
 				switch (untranslated_flag) {
 					case 0: flag = CPU_FLAG_N; break;
 					case 1: flag = CPU_FLAG_V; break;
@@ -674,8 +682,7 @@ struct CPU {
 				if (check_flag(flag) == condition) {
 					last_jump_origin = PC;
 					stall_n_cycles(mmu, 1); // TODO: 2 if to a new page
-					Byte_S offset = next_byte;
-					PC += offset;
+					PC = (Word)(PC + (Byte_S)next_byte); // Convert to signed type to do signed addition
 					last_jump_target = PC;
 				}
 				
@@ -709,7 +716,7 @@ struct CPU {
 				case 0b010: {
 					// JMP - Absolute Jump
 					Word jump_target = next_byte;
-					jump_target |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
+					jump_target |= (Word)(((Word)fetch_one_byte(mmu, PC + 2)) << 8);
 					last_jump_origin = PC;
 					last_jump_target = jump_target;
 					PC = jump_target;
@@ -718,9 +725,9 @@ struct CPU {
 				case 0b011: {
 					// JMP - Indirect Jump
 					Word jump_target_location = next_byte;
-					jump_target_location |= ((Word)fetch_one_byte(mmu, PC + 2)) << 8;
+					jump_target_location |= (Word)(((Word)fetch_one_byte(mmu, PC + 2)) << 8);
 					Word jump_target = fetch_one_byte(mmu, jump_target_location);
-					jump_target |= ((Word)fetch_one_byte(mmu, jump_target_location + 1)) << 8;
+					jump_target |= (Word)(((Word)fetch_one_byte(mmu, jump_target_location + 1)) << 8);
 					last_jump_origin = PC;
 					last_jump_target = jump_target;
 					PC = jump_target;
@@ -834,7 +841,7 @@ int main(int argc, char* argv[]) {
 				break;
 			}
 			else if (cmd == 'j' || cmd == 'J') {
-				Word location = std::stoi(command_parts[1]);
+				Word location = static_cast<Word>(std::stoi(command_parts[1]));
 				std::cout << "Jumping to 0x" << std::hex << (int)location << std::endl;
 				cpu.PC = location;
 				continue;

@@ -8,4 +8,8 @@ set(SRC_FILES
 	src/rampage.cpp
 )
 
+add_compile_options(
+    -Wall -Wconversion -Wsign-conversion
+)
+
 add_executable(main ${SRC_FILES})

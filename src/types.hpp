@@ -6,15 +6,14 @@ using Byte = uint8_t;
 using Byte_S = int8_t;
 using Word = uint16_t;
 
-static constexpr Word CPU_FLAG_N = 0b10000000;
-static constexpr Word CPU_FLAG_V = 0b01000000;
-static constexpr Word CPU_FLAG_B = 0b00010000;
-static constexpr Word CPU_FLAG_D = 0b00001000;
-static constexpr Word CPU_FLAG_I = 0b00000100;
-static constexpr Word CPU_FLAG_Z = 0b00000010;
-static constexpr Word CPU_FLAG_C = 0b00000001;
-
-static constexpr Word CPU_FLAG_UNUSED = 0b00100000;
+static constexpr Byte CPU_FLAG_N = 0b10000000;
+static constexpr Byte CPU_FLAG_V = 0b01000000;
+static constexpr Byte CPU_FLAG_B = 0b00010000;
+static constexpr Byte CPU_FLAG_D = 0b00001000;
+static constexpr Byte CPU_FLAG_I = 0b00000100;
+static constexpr Byte CPU_FLAG_Z = 0b00000010;
+static constexpr Byte CPU_FLAG_C = 0b00000001;
+static constexpr Byte CPU_FLAG_UNUSED = 0b00100000;
 
 static constexpr Byte CPU_UOP_NONE  = 0b0000;
 static constexpr Byte CPU_UOP_FETCH = 0b0001;
@@ -37,3 +36,7 @@ enum CPUStatus {
 	HALT,
 	INVALID
 };
+
+constexpr uint8_t operator "" _b(unsigned long long x) {
+	return static_cast<uint8_t>(x);
+}

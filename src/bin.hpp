@@ -16,7 +16,7 @@ struct binary_stream {
 		if (value == 0) {
 			os << '0';
 		} else {
-			std::bitset<sizeof(T) * 8> bits(value);
+			std::bitset<sizeof(T) * 8> bits(static_cast<unsigned long long>(value));
 			auto str = bits.to_string();
 			os << str.substr(str.find('1'));
 		}
