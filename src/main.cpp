@@ -74,6 +74,7 @@ struct CPU {
 		SP = 0xFD; // Stack pointer starts at 0x01FF, but is decremented first
 		PC = mmu.read_word(0xFFFC); // Read reset vector
 		SF = 0b00100100; // Processor status. No interrupts, no BCD mode, set break flag
+		cycle_count = 7; // Takes 7 cycles to reset
 	}
 
 	void set_flag(Byte flag, Byte value) {
