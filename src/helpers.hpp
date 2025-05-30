@@ -18,3 +18,7 @@ inline constexpr Byte lo(Word w) {
 inline constexpr Byte hi(Word w) {
 	return static_cast<Byte>((w >> 8) & 0xFF_b);
 }
+
+inline constexpr Word make_address(Byte b_lo, Byte b_hi) {
+	return static_cast<Word>(widen(b_lo) | (widen(b_hi) << 8));
+}

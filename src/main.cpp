@@ -329,7 +329,7 @@ struct CPU {
 				stack_push(mmu, lo(to_push));
 				stack_push_status_flags(mmu);
 				SF |= CPU_FLAG_B;
-				Word interrupt_vector = (widen(fetch_one_byte(mmu, 0xFFFE)) << 8) | fetch_one_byte(mmu, 0xFFFF);
+				Word interrupt_vector = make_address(fetch_one_byte(mmu, 0xFFFE), fetch_one_byte(mmu, 0xFFFF));
 				last_jump_origin = PC;
 				last_jump_target = interrupt_vector;
 				PC = interrupt_vector - 1; // -1 to compensate for later PC++
@@ -455,7 +455,7 @@ struct CPU {
 				Word return_addr = PC + 2;
 				stack_push(mmu, hi(return_addr));
 				stack_push(mmu, lo(return_addr));
-				Word target = next_byte | (widen(fetch_one_byte(mmu, PC + 2)) << 8);
+				Word target = make_address(next_byte, fetch_one_byte(mmu, PC + 2));
 				last_jump_origin = PC;
 				last_jump_target = target;
 				PC = target - 1; // Compensate
