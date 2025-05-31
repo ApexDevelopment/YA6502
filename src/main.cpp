@@ -55,6 +55,7 @@ static Byte addr_mode_table[8][8] = {
 struct CPU {
 	unsigned long cycle_count = 0;
 	
+	CPUType type = MOS;
 	Byte A, X, Y; // Registers
 	Byte SP;      // Stack Pointer
 	Word PC;      // Program Counter
@@ -86,11 +87,11 @@ struct CPU {
 		}
 	}
 
-	Byte check_flag(Byte flag) {
+	bool check_flag(Byte flag) {
 		if (SF & flag) {
-			return 1;
+			return true;
 		}
-		return 0;
+		return false;
 	}
 
 	void dump_state(MMU& mmu) {
@@ -115,6 +116,11 @@ struct CPU {
 		std::ostringstream oss;
 		oss << std::hex << std::setw(4) << std::setfill('0') << (int)PC;
 		oss << " " << std::hex << std::setw(2) << std::setfill('0') << (int)instruction;
+		oss << std::setw(32) << std::setfill(' ') << "";
+		oss << "A:" << std::hex << std::setw(2) << std::setfill('0') << (int)A;
+		oss << " X:" << std::hex << std::setw(2) << std::setfill('0') << (int)X;
+		oss << " Y:" << std::hex << std::setw(2) << std::setfill('0') << (int)Y;
+		oss << " P:" << std::hex << std::setw(2) << std::setfill('0') << (int)SF;
 		std::string result = oss.str();
 		return result;
 	}
@@ -309,6 +315,47 @@ struct CPU {
 			}
 			default: break;
 		}
+	}
+
+	bool nibble_add(Byte a, Byte b, Byte c, Byte& d) {
+		Byte result = static_cast<Byte>(a + b + c);
+		d = result & 0xF_b;
+		return (check_flag(CPU_FLAG_D) && type != NES) ? result > 0x9 : result > 0xF;
+	}
+
+	Byte adjust_decimal(Byte b) {
+		if (!check_flag(CPU_FLAG_D) || type == NES) {
+			return b;
+		}
+
+		Byte lo_nib = b & 0xF_b;
+		Byte hi_nib = (b & 0xF0_b) >> 4;
+		lo_nib %= 0xA;
+		hi_nib %= 0xA;
+		return lo_nib | (hi_nib << 4);
+	}
+
+	// http://www.6502.org/tutorials/decimal_mode.html#A
+	// https://forums.atariage.com/topic/163876-flags-on-decimal-mode-on-the-nmos-6502
+	// https://c74project.com/card-b-alu-cu/
+	void full_add(Byte operand) {
+		Byte o_lo_nib = operand & 0xF_b;
+		Byte o_hi_nib = (operand & 0xF0_b) >> 4;
+		Byte A_lo_nib = A & 0xF_b;
+		Byte A_hi_nib = (A & 0xF0_b) >> 4;
+
+		Byte result_lo_nib = 0;
+		Byte result_hi_nib = 0;
+		bool half_carry = nibble_add(A_lo_nib, o_lo_nib, check_flag(CPU_FLAG_C), result_lo_nib);
+		bool carry_out = nibble_add(A_hi_nib, o_hi_nib, half_carry, result_hi_nib);
+		Byte result = result_lo_nib | (result_hi_nib << 4);
+		
+		set_flag(CPU_FLAG_C, carry_out);
+		set_flag(CPU_FLAG_Z, result == 0);
+		set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
+		set_flag(CPU_FLAG_N, result & 0b10000000);
+
+		A = adjust_decimal(result);
 	}
 
 	// https://www.nesdev.org/obelisk-6502-guide/reference.html
@@ -544,15 +591,17 @@ struct CPU {
 				case 0b011: {
 					// ADC - Add with Carry
 					Byte operand = auto_fetch_value(mmu, next_byte, final_addr_mode);
-					Word result = static_cast<Word>(
-						widen(A)
-						+ widen(operand)
-						+ widen(check_flag(CPU_FLAG_C)));
-					A = lo(result);
-					set_flag(CPU_FLAG_C, result > 0xFF);
-					set_flag(CPU_FLAG_Z, A == 0);
-					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
-					set_flag(CPU_FLAG_N, A & 0b10000000);
+					full_add(operand);
+					
+					// Word result = static_cast<Word>(
+					// 	widen(A)
+					// 	+ widen(operand)
+					// 	+ widen(check_flag(CPU_FLAG_C)));
+					// A = lo(result);
+					// set_flag(CPU_FLAG_C, result > 0xFF); // In BCD mode this is 0x99 instead of 0xFF
+					// set_flag(CPU_FLAG_Z, A == 0); // Works the same in BCD mode
+					// set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
+					// set_flag(CPU_FLAG_N, A & 0b10000000); // Works the same in BCD mode
 					break;
 				}
 				case 0b100: {
@@ -579,15 +628,7 @@ struct CPU {
 				case 0b111: {
 					// SBC - Subtract with Carry
 					Byte operand = ~auto_fetch_value(mmu, next_byte, final_addr_mode);
-					Word result = static_cast<Word>(
-						widen(A)
-						+ widen(operand)
-						+ widen(check_flag(CPU_FLAG_C)));
-					A = lo(result);
-					set_flag(CPU_FLAG_C, result > 0xFF);
-					set_flag(CPU_FLAG_Z, A == 0);
-					set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
-					set_flag(CPU_FLAG_N, A & 0b10000000);
+					full_add(operand);
 					break;
 				}
 				default:
@@ -885,6 +926,30 @@ int main(int argc, char* argv[]) {
 				std::cout << "Quitting emulator...\n";
 				running = false;
 				break;
+			}
+			else if (cmd == 't' || cmd == 'T') {
+				if (command_parts.size() > 1) {
+					std::string type_name = command_parts[1];
+					bool found = true;
+					if (type_name == "MOS") {
+						cpu.type = MOS;
+					}
+					else if (type_name == "NES") {
+						cpu.type = NES;
+					}
+					else {
+						std::cout << "Unknown type." << std::endl;
+						found = false;
+					}
+
+					if (found) {
+						std::cout << "Successfully switched 6502 type." << std::endl;
+					}
+				}
+				else {
+					std::cout << "Specify the type of 6502." << std::endl;
+				}
+				continue;
 			}
 			else if (cmd == 'l' || cmd == 'L') {
 				if (command_parts.size() > 1) {

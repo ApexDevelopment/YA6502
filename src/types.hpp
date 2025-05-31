@@ -37,3 +37,8 @@ enum CPUStatus {
 	INVALID,
 	BREAKPOINT
 };
+
+enum CPUType {
+	MOS = 0,
+	NES
+};
