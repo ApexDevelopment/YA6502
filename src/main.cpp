@@ -294,20 +294,22 @@ struct CPU {
 				break;
 			}
 			case CPU_ADDR_MODE_ABS: {
-				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
-				Word address = widen(next_byte) | high_addr_byte;
+				Byte high_addr_byte = fetch_one_byte(mmu, PC + 2);
+				Word address = make_address(next_byte, high_addr_byte);
 				write_one_byte(mmu, address, value);
 				break;
 			}
 			case CPU_ADDR_MODE_ABX: {
-				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2) << 8);
-				Word address = widen(next_byte) | high_addr_byte;
+				Byte high_addr_byte = fetch_one_byte(mmu, PC + 2);
+				Word address = make_address(next_byte, high_addr_byte);
+				// TODO: Does the extra cycle from reading the unindexed address apply here?
 				write_one_byte(mmu, address + X, value); // TODO: Page boundary
 				break;
 			}
 			case CPU_ADDR_MODE_ABY: {
-				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
-				Word address = widen(next_byte) | high_addr_byte;
+				Byte high_addr_byte = fetch_one_byte(mmu, PC + 2);
+				Word address = make_address(next_byte, high_addr_byte);
+				// TODO: Does the extra cycle from reading the unindexed address apply here?
 				write_one_byte(mmu, address + Y, value); // TODO: Page boundary
 				break;
 			}
