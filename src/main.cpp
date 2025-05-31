@@ -619,10 +619,12 @@ struct CPU {
 				case 0b110: {
 					// CMP - Compare Accumulator
 					Byte compare_mem = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					Word result = static_cast<Word>(A - compare_mem);
 					
-					set_flag(CPU_FLAG_C, A >= compare_mem);
-					set_flag(CPU_FLAG_Z, A == compare_mem);
-					set_flag(CPU_FLAG_N, A <  compare_mem);
+					// Gross...
+					set_flag(CPU_FLAG_C, A >= result);
+					set_flag(CPU_FLAG_Z, result == 0);
+					set_flag(CPU_FLAG_N, static_cast<Byte>(result & 0b10000000));
 					break;
 				}
 				case 0b111: {
@@ -669,6 +671,7 @@ struct CPU {
 					set_flag(CPU_FLAG_C, to_shift & 1);
 					to_shift >>= 1;
 					set_flag(CPU_FLAG_Z, to_shift == 0); // Weirdly differs from the others on NESdev
+					set_flag(CPU_FLAG_N, to_shift & 0b10000000);
 					// TODO: Figure out how this works if we are in accumulator addressing mode
 					auto_write_value(mmu, next_byte, final_addr_mode, to_shift);
 					break;
@@ -833,20 +836,22 @@ struct CPU {
 				case 0b110: {
 					// CPY - Compare Y Register
 					Byte compare_mem = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					Word result = static_cast<Word>(Y - compare_mem);
 					
 					set_flag(CPU_FLAG_C, Y >= compare_mem);
-					set_flag(CPU_FLAG_Z, Y == compare_mem);
-					set_flag(CPU_FLAG_N, Y <  compare_mem);
+					set_flag(CPU_FLAG_Z, result == 0);
+					set_flag(CPU_FLAG_N, static_cast<Byte>(result & 0b10000000));
 					auto_increment_pc(final_addr_mode);
 					break;
 				}
 				case 0b111: {
 					// CPX - Compare X Register
 					Byte compare_mem = auto_fetch_value(mmu, next_byte, final_addr_mode);
+					Word result = static_cast<Word>(X - compare_mem);
 					
 					set_flag(CPU_FLAG_C, X >= compare_mem);
-					set_flag(CPU_FLAG_Z, X == compare_mem);
-					set_flag(CPU_FLAG_N, X <  compare_mem);
+					set_flag(CPU_FLAG_Z, result == 0);
+					set_flag(CPU_FLAG_N, static_cast<Byte>(result & 0b10000000));
 					auto_increment_pc(final_addr_mode);
 					break;
 				}
