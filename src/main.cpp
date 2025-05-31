@@ -258,9 +258,13 @@ struct CPU {
 				Word address = addr_lo | addr_hi; // Read address from table
 				return fetch_one_byte(mmu, address); // Read from that address
 			}
+			// The NESDev Obelisk guide documents Indirect,Y incorrectly
 			case CPU_ADDR_MODE_ZPY_IND: {
-				Word low_addr_byte = widen(fetch_one_byte(mmu, widen(next_byte))); // ZP contains LSByte
-				Word address = low_addr_byte + Y; // LSByte + Y is address to fetch from
+				// ZP contains pointer (base addr)
+				Word addr_lo = widen(fetch_one_byte(mmu, widen(next_byte)));
+				// TODO: Does zp wrapping also occur here?
+				Word addr_hi = widen(fetch_one_byte(mmu, widen(static_cast<Byte>(next_byte + 1)))) << 8;
+				Word address = (addr_lo | addr_hi) + Y;
 				return fetch_one_byte(mmu, address); // Get it baby!
 			}
 			default: break;
@@ -318,8 +322,10 @@ struct CPU {
 				break;
 			}
 			case CPU_ADDR_MODE_ZPY_IND: {
-				Word low_addr_byte = widen(fetch_one_byte(mmu, widen(next_byte)));
-				Word address = low_addr_byte + Y;
+				// ZP contains pointer (base addr)
+				Word addr_lo = widen(fetch_one_byte(mmu, widen(next_byte)));
+				Word addr_hi = widen(fetch_one_byte(mmu, widen(static_cast<Byte>(next_byte + 1)))) << 8;
+				Word address = (addr_lo | addr_hi) + Y;
 				write_one_byte(mmu, address, value);
 				break;
 			}
@@ -742,7 +748,7 @@ struct CPU {
 					// DEC - Decrement Memory
 					// DEC A is DEX but that is handled earlier
 					// TODO: Check if this uses the correct number of cycles
-					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode) - 1;
+					Byte M = lo(static_cast<Word>(auto_fetch_value(mmu, next_byte, final_addr_mode) - 1));
 					set_flag(CPU_FLAG_Z, M == 0);
 					set_flag(CPU_FLAG_N, M & 0b10000000);
 					auto_write_value(mmu, next_byte, final_addr_mode, M);
@@ -752,7 +758,7 @@ struct CPU {
 					// INC - Increment Memory
 					// INC A is NOP but that is handled earlier
 					// TODO: Check if this uses the correct number of cycles
-					Byte M = auto_fetch_value(mmu, next_byte, final_addr_mode) + 1;
+					Byte M = lo(static_cast<Word>(auto_fetch_value(mmu, next_byte, final_addr_mode) + 1));
 					set_flag(CPU_FLAG_Z, M == 0);
 					set_flag(CPU_FLAG_N, M & 0b10000000);
 					auto_write_value(mmu, next_byte, final_addr_mode, M);
