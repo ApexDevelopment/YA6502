@@ -828,8 +828,14 @@ struct CPU {
 				}
 				case 0b011: {
 					// JMP - Indirect Jump
-					Word jump_target_location = make_address(next_byte, fetch_one_byte(mmu, PC + 2));
-					Word jump_target = make_address(fetch_one_byte(mmu, jump_target_location), fetch_one_byte(mmu, jump_target_location + 1));
+					Byte jump_target_location_lo = next_byte;
+					Byte jump_target_location_hi = fetch_one_byte(mmu, PC + 2);
+					Word jump_target_location = make_address(jump_target_location_lo, jump_target_location_hi);
+					bool wraparound = jump_target_location_lo == 0xFF;
+
+					Byte jump_target_lo = fetch_one_byte(mmu, jump_target_location);
+					Byte jump_target_hi = fetch_one_byte(mmu, wraparound ? jump_target_location + 1 - 0x100 : jump_target_location + 1);
+					Word jump_target = make_address(jump_target_lo, jump_target_hi);
 					last_jump_origin = PC;
 					last_jump_target = jump_target;
 					PC = jump_target;
