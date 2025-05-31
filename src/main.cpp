@@ -308,7 +308,12 @@ struct CPU {
 				break;
 			}
 			case CPU_ADDR_MODE_ZPX_IND: {
-				Word address = widen(fetch_one_byte(mmu, lo(widen(next_byte) + X)));
+				Byte zp_indexed = lo(widen(next_byte) + X);
+				// TODO: Does zp wrapping also occur here?
+				Byte zp_indexed_next = lo(static_cast<Word>(widen(next_byte) + X + 1));
+				Word addr_lo = widen(fetch_one_byte(mmu, zp_indexed));
+				Word addr_hi = widen(fetch_one_byte(mmu, zp_indexed_next)) << 8;
+				Word address = addr_lo | addr_hi; // Read address from table
 				write_one_byte(mmu, address, value);
 				break;
 			}
