@@ -250,7 +250,12 @@ struct CPU {
 			}
 			case CPU_ADDR_MODE_ZPX_IND: {
 				// ZPX Indexed Indirect addressing typically fetches from an address stored in a table residing in ZP
-				Word address = widen(fetch_one_byte(mmu, lo(widen(next_byte) + X))); // Read address from table
+				Byte zp_indexed = lo(widen(next_byte) + X);
+				// TODO: Does zp wrapping also occur here?
+				Byte zp_indexed_next = lo(static_cast<Word>(widen(next_byte) + X + 1));
+				Word addr_lo = widen(fetch_one_byte(mmu, zp_indexed));
+				Word addr_hi = widen(fetch_one_byte(mmu, zp_indexed_next)) << 8;
+				Word address = addr_lo | addr_hi; // Read address from table
 				return fetch_one_byte(mmu, address); // Read from that address
 			}
 			case CPU_ADDR_MODE_ZPY_IND: {
@@ -994,7 +999,19 @@ int main(int argc, char* argv[]) {
 				paused = false;
 			}
 			else if (cmd == 'i' || cmd == 'I') {
-				cpu.dump_state(mmu);
+				if (command_parts.size() > 1) {
+					try {
+						Word location = static_cast<Word>(parse_numeric_literal(command_parts[1]));
+						std::cout << "Value at 0x" << std::hex << (int)location 
+							<< " is 0x" << std::hex << (int)mmu.read_byte(location) << std::endl;
+					}
+					catch (const std::exception& e) {
+						std::cerr << "Invalid numeric input: " << e.what() << std::endl;
+					}
+				}
+				else {
+					cpu.dump_state(mmu);
+				}
 				continue;
 			}
 			else {
