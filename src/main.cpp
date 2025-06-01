@@ -234,18 +234,18 @@ struct CPU {
 				return fetch_one_byte(mmu, lo(widen(next_byte) + Y));
 			}
 			case CPU_ADDR_MODE_ABS: {
-				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
-				Word address = widen(next_byte) | high_addr_byte;
+				Byte high_addr_byte = fetch_one_byte(mmu, PC + 2);
+				Word address = make_address(next_byte, high_addr_byte);
 				return fetch_one_byte(mmu, address);
 			}
 			case CPU_ADDR_MODE_ABX: {
-				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
-				Word address = widen(next_byte) | high_addr_byte;
+				Byte high_addr_byte = fetch_one_byte(mmu, PC + 2);
+				Word address = make_address(next_byte, high_addr_byte);
 				return fetch_one_byte(mmu, address + X); // TODO: Page boundary
 			}
 			case CPU_ADDR_MODE_ABY: {
-				Word high_addr_byte = widen(fetch_one_byte(mmu, PC + 2)) << 8;
-				Word address = widen(next_byte) | high_addr_byte;
+				Byte high_addr_byte = fetch_one_byte(mmu, PC + 2);
+				Word address = make_address(next_byte, high_addr_byte);
 				return fetch_one_byte(mmu, address + Y); // TODO: Page boundary
 			}
 			case CPU_ADDR_MODE_ZPX_IND: {
@@ -253,18 +253,19 @@ struct CPU {
 				Byte zp_indexed = lo(widen(next_byte) + X);
 				// TODO: Does zp wrapping also occur here?
 				Byte zp_indexed_next = lo(static_cast<Word>(widen(next_byte) + X + 1));
-				Word addr_lo = widen(fetch_one_byte(mmu, zp_indexed));
-				Word addr_hi = widen(fetch_one_byte(mmu, zp_indexed_next)) << 8;
-				Word address = addr_lo | addr_hi; // Read address from table
+				// Read address from table
+				Byte addr_lo = fetch_one_byte(mmu, zp_indexed);
+				Byte addr_hi = fetch_one_byte(mmu, zp_indexed_next);
+				Word address = make_address(addr_lo, addr_hi);
 				return fetch_one_byte(mmu, address); // Read from that address
 			}
 			// The NESDev Obelisk guide documents Indirect,Y incorrectly
 			case CPU_ADDR_MODE_ZPY_IND: {
 				// ZP contains pointer (base addr)
-				Word addr_lo = widen(fetch_one_byte(mmu, widen(next_byte)));
+				Byte addr_lo = fetch_one_byte(mmu, widen(next_byte));
 				// TODO: Does zp wrapping also occur here?
-				Word addr_hi = widen(fetch_one_byte(mmu, widen(static_cast<Byte>(next_byte + 1)))) << 8;
-				Word address = (addr_lo | addr_hi) + Y;
+				Byte addr_hi = fetch_one_byte(mmu, widen(static_cast<Byte>(next_byte + 1)));
+				Word address = make_address(addr_lo, addr_hi) + Y;
 				return fetch_one_byte(mmu, address); // Get it baby!
 			}
 			default: break;
@@ -317,17 +318,18 @@ struct CPU {
 				Byte zp_indexed = lo(widen(next_byte) + X);
 				// TODO: Does zp wrapping also occur here?
 				Byte zp_indexed_next = lo(static_cast<Word>(widen(next_byte) + X + 1));
-				Word addr_lo = widen(fetch_one_byte(mmu, zp_indexed));
-				Word addr_hi = widen(fetch_one_byte(mmu, zp_indexed_next)) << 8;
-				Word address = addr_lo | addr_hi; // Read address from table
+				// Read address from table
+				Byte addr_lo = fetch_one_byte(mmu, zp_indexed);
+				Byte addr_hi = fetch_one_byte(mmu, zp_indexed_next);
+				Word address = make_address(addr_lo, addr_hi);
 				write_one_byte(mmu, address, value);
 				break;
 			}
 			case CPU_ADDR_MODE_ZPY_IND: {
 				// ZP contains pointer (base addr)
-				Word addr_lo = widen(fetch_one_byte(mmu, widen(next_byte)));
-				Word addr_hi = widen(fetch_one_byte(mmu, widen(static_cast<Byte>(next_byte + 1)))) << 8;
-				Word address = (addr_lo | addr_hi) + Y;
+				Byte addr_lo = fetch_one_byte(mmu, widen(next_byte));
+				Byte addr_hi = fetch_one_byte(mmu, widen(static_cast<Byte>(next_byte + 1)));
+				Word address = make_address(addr_lo, addr_hi) + Y;
 				write_one_byte(mmu, address, value);
 				break;
 			}
