@@ -335,45 +335,64 @@ struct CPU {
 		}
 	}
 
-	bool nibble_add(Byte a, Byte b, Byte c, Byte& d) {
-		Byte result = static_cast<Byte>(a + b + c);
-		d = result & 0xF_b;
-		return (check_flag(CPU_FLAG_D) && type != NES) ? result > 0x9 : result > 0xF;
+	bool should_apply_bcd() {
+		return check_flag(CPU_FLAG_D) && type != NES;
 	}
 
-	Byte adjust_decimal(Byte b) {
-		if (!check_flag(CPU_FLAG_D) || type == NES) {
-			return b;
+	bool nibble_add(bool bcd_sub, Byte a, Byte b, Byte c, Byte& d) {
+		Byte result = static_cast<Byte>(a + b + c);
+		d = result & 0xF_b;
+		bool alu_c_out = result > 0xF;
+		bool bcd_invalid = d > 9;
+		
+		// As far as I can tell nobody has described this behavior accurately
+		// This took me about a whole day of screwing around to get it to pass
+		if (should_apply_bcd()) {
+			if (bcd_invalid) {
+				if (bcd_sub) {
+					d = static_cast<Byte>(d - 6) & 0xF_b;
+					if (!alu_c_out) {
+						return false;
+					}
+				}
+				else {
+					d = static_cast<Byte>(d + 6) & 0xF_b;
+				}
+			}
+			else if (alu_c_out && !bcd_sub) {
+				d = static_cast<Byte>(d + 6) & 0xF_b;
+			}
+			else if (!alu_c_out && bcd_sub) {
+				d = static_cast<Byte>(d - 6) & 0xF_b;
+			}
+
+			return alu_c_out || bcd_invalid;
 		}
 
-		Byte lo_nib = b & 0xF_b;
-		Byte hi_nib = (b & 0xF0_b) >> 4;
-		lo_nib %= 0xA;
-		hi_nib %= 0xA;
-		return lo_nib | (hi_nib << 4);
+		return alu_c_out;
 	}
 
 	// http://www.6502.org/tutorials/decimal_mode.html#A
 	// https://forums.atariage.com/topic/163876-flags-on-decimal-mode-on-the-nmos-6502
 	// https://c74project.com/card-b-alu-cu/
-	void full_add(Byte operand) {
-		Byte o_lo_nib = operand & 0xF_b;
-		Byte o_hi_nib = (operand & 0xF0_b) >> 4;
+	void full_add(Byte operand, bool bcd_sub) {
 		Byte A_lo_nib = A & 0xF_b;
-		Byte A_hi_nib = (A & 0xF0_b) >> 4;
+		Byte A_hi_nib = A >> 4;
+		Byte o_lo_nib = operand & 0xF_b;
+		Byte o_hi_nib = operand >> 4;
 
 		Byte result_lo_nib = 0;
 		Byte result_hi_nib = 0;
-		bool half_carry = nibble_add(A_lo_nib, o_lo_nib, check_flag(CPU_FLAG_C), result_lo_nib);
-		bool carry_out = nibble_add(A_hi_nib, o_hi_nib, half_carry, result_hi_nib);
-		Byte result = result_lo_nib | (result_hi_nib << 4);
-		
+		bool half_carry = nibble_add(bcd_sub, A_lo_nib, o_lo_nib, check_flag(CPU_FLAG_C), result_lo_nib);
+		bool carry_out = nibble_add(bcd_sub, A_hi_nib, o_hi_nib, half_carry, result_hi_nib);
+		Byte result = make_byte(result_lo_nib, result_hi_nib);
+
 		set_flag(CPU_FLAG_C, carry_out);
 		set_flag(CPU_FLAG_Z, result == 0);
 		set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
 		set_flag(CPU_FLAG_N, result & 0b10000000);
 
-		A = adjust_decimal(result);
+		A = result;
 	}
 
 	// https://www.nesdev.org/obelisk-6502-guide/reference.html
@@ -609,17 +628,7 @@ struct CPU {
 				case 0b011: {
 					// ADC - Add with Carry
 					Byte operand = auto_fetch_value(mmu, next_byte, final_addr_mode);
-					full_add(operand);
-					
-					// Word result = static_cast<Word>(
-					// 	widen(A)
-					// 	+ widen(operand)
-					// 	+ widen(check_flag(CPU_FLAG_C)));
-					// A = lo(result);
-					// set_flag(CPU_FLAG_C, result > 0xFF); // In BCD mode this is 0x99 instead of 0xFF
-					// set_flag(CPU_FLAG_Z, A == 0); // Works the same in BCD mode
-					// set_flag(CPU_FLAG_V, (~(A ^ operand) & (A ^ result)) & 0b10000000);
-					// set_flag(CPU_FLAG_N, A & 0b10000000); // Works the same in BCD mode
+					full_add(operand, false);
 					break;
 				}
 				case 0b100: {
@@ -648,7 +657,7 @@ struct CPU {
 				case 0b111: {
 					// SBC - Subtract with Carry
 					Byte operand = ~auto_fetch_value(mmu, next_byte, final_addr_mode);
-					full_add(operand);
+					full_add(operand, true);
 					break;
 				}
 				default:
