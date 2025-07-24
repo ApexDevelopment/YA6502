@@ -142,9 +142,9 @@ struct CPU {
 
 	void stall_n_cycles(MMU& mmu, int n_cycles) {
 		// Could probably just cycle_count+=n_cycles but whatever
-		for (; n_cycles >= 0; n_cycles--) {
-			exec_cycle(mmu, CPU_UOP_NONE);
-		}
+                for (; n_cycles > 0; n_cycles--) {
+                        exec_cycle(mmu, CPU_UOP_NONE);
+                }
 	}
 
 	Byte fetch_one_byte(MMU& mmu, Word address) {
